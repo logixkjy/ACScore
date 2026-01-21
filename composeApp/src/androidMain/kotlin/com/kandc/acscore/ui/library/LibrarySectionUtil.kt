@@ -1,5 +1,6 @@
 package com.kandc.acscore.ui.library
 
+import com.kandc.acscore.data.model.Score
 import com.kandc.acscore.util.KoreanChosung
 
 internal fun sectionKey(title: String): String {
@@ -20,8 +21,7 @@ internal fun sectionKey(title: String): String {
     }
 }
 
-internal fun buildSections(scores: List<com.kandc.acscore.data.model.Score>)
-        : List<Pair<String, List<com.kandc.acscore.data.model.Score>>> {
+internal fun buildSections(scores: List<Score>): List<Pair<String, List<Score>>> {
     return scores
         .groupBy { sectionKey(it.title) }
         .toSortedMap(compareBySectionKey())
@@ -38,14 +38,11 @@ private fun compareBySectionKey(): Comparator<String> = Comparator { a, b ->
 
     val ra = rank(a)
     val rb = rank(b)
-
     if (ra != rb) return@Comparator ra - rb
 
-    // 같은 그룹 내에서는 문자 순서
+    // 같은 그룹 내 정렬
     when (ra) {
-        1 -> { // 한글 초성 순서 고정
-            KoreanChosung.indexOf(a[0]) - KoreanChosung.indexOf(b[0])
-        }
-        else -> a.compareTo(b)
+        1 -> KoreanChosung.indexOf(a[0]) - KoreanChosung.indexOf(b[0]) // 한글 초성 고정 순서
+        else -> a.compareTo(b) // 0-9 / A-Z / # 는 기본 정렬
     }
 }
