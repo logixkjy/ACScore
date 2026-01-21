@@ -66,7 +66,12 @@ fun LibraryScreen(
                     .fillMaxWidth()
                     .padding(12.dp),
                 singleLine = true,
-                placeholder = { Text("제목 검색") }
+                placeholder = { Text("제목/초성 검색 (예: ㅇㄹㄷ, 찬송)") },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        TextButton(onClick = { vm.clearQuery() }) { Text("X") }
+                    }
+                }
             )
 
             if (scores.isEmpty()) {

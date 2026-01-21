@@ -6,6 +6,8 @@ import com.kandc.acscore.data.model.Score
 import com.kandc.acscore.domain.ImportScoreUseCase
 import com.kandc.acscore.domain.LoadScoresUseCase
 import com.kandc.acscore.domain.SearchScoresUseCase
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -24,6 +26,8 @@ class LibraryViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    private var searchJob: Job? = null
+    private val debounceMs = 300L
     fun refresh() {
         viewModelScope.launch {
             val q = _query.value.trim()
@@ -33,14 +37,27 @@ class LibraryViewModel(
 
     fun setQuery(value: String) {
         _query.value = value
-        refresh()
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(debounceMs)
+            val q = _query.value.trim()
+            _scores.value = if (q.isEmpty()) loadScores() else searchScores(q)
+        }
+    }
+
+    fun clearQuery() {
+        setQuery("")
     }
 
     fun import(uriString: String) {
         viewModelScope.launch {
             importScore(uriString)
-                .onSuccess { refresh() }
-                .onFailure { e -> _error.value = e.message ?: "Import failed" }
+                .onSuccess {
+                    refresh()
+                }
+                .onFailure { e ->
+                    _error.value = e.message ?: "Import failed"
+                }
         }
     }
 
