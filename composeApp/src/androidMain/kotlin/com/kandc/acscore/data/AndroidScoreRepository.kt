@@ -118,20 +118,19 @@ class AndroidScoreRepository(
             val q = query.trim()
             if (q.isEmpty()) return@runCatching dao.getAll().map { it.toModel() }
 
-            // title LIKE 안전 처리(%, _, \)
             val safeTitle = q
                 .replace("\\", "\\\\")
                 .replace("%", "\\%")
                 .replace("_", "\\_")
 
-            // 검색어에서 초성만 뽑아 같이 검색
-            val chosungQuery = KoreanChosung.extractOnlyChosung(q)
+            // 입력을 초성으로 변환하되, 공백 유지/제거 둘 다 준비
+            val chosungWithSpace = KoreanChosung.extractForQueryPreserveSpaces(q)
+            val chosungNoSpace = chosungWithSpace.replace(" ", "")
 
-            dao.searchCombined(
+            dao.searchCombinedNormalized(
                 titleQuery = safeTitle,
-                chosungQuery = chosungQuery
+                chosungQueryWithSpace = chosungWithSpace,
+                chosungQueryNoSpace = chosungNoSpace
             ).map { it.toModel() }
         }.getOrElse { emptyList() }
-
-
 }

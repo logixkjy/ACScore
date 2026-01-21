@@ -46,4 +46,18 @@ object KoreanChosung {
     }
 
     fun indexOf(ch: Char): Int = CHOSUNG.indexOf(ch)
+
+    fun extractForQueryPreserveSpaces(text: String): String {
+        val sb = StringBuilder()
+        for (ch in text) {
+            when {
+                ch in '가'..'힣' -> sb.append(initialOf(ch))
+                isChosung(ch) -> sb.append(ch)
+                ch.isDigit() -> sb.append(ch)
+                ch in 'A'..'Z' || ch in 'a'..'z' -> sb.append(ch.uppercaseChar())
+                ch.isWhitespace() -> sb.append(' ')
+            }
+        }
+        return sb.toString().trim().replace(Regex("\\s+"), " ")
+    }
 }

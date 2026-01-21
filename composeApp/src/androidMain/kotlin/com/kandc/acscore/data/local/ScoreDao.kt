@@ -25,13 +25,15 @@ interface ScoreDao {
         """
     SELECT * FROM scores
     WHERE title LIKE '%' || :titleQuery || '%' ESCAPE '\'
-       OR chosung LIKE '%' || :chosungQuery || '%'
+       OR chosung LIKE '%' || :chosungQueryWithSpace || '%'
+       OR REPLACE(chosung, ' ', '') LIKE '%' || :chosungQueryNoSpace || '%'
     ORDER BY createdAt DESC
     """
     )
-    suspend fun searchCombined(
+    suspend fun searchCombinedNormalized(
         titleQuery: String,
-        chosungQuery: String
+        chosungQueryWithSpace: String,
+        chosungQueryNoSpace: String
     ): List<ScoreEntity>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
