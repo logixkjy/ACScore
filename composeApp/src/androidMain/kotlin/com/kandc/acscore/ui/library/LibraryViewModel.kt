@@ -11,6 +11,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.text.Collator
+import java.util.Locale
 
 class LibraryViewModel(
     private val loadScores: LoadScoresUseCase,
@@ -28,10 +30,18 @@ class LibraryViewModel(
 
     private var searchJob: Job? = null
     private val debounceMs = 300L
+
+    private val koCollator: Collator = Collator.getInstance(Locale.KOREAN).apply {
+        strength = Collator.TERTIARY
+    }
+
+    private fun sortByTitle(list: List<Score>): List<Score> =
+        list.sortedWith { a, b -> koCollator.compare(a.title, b.title) }
+
     fun refresh() {
         viewModelScope.launch {
             val q = _query.value.trim()
-            _scores.value = if (q.isEmpty()) loadScores() else searchScores(q)
+            _scores.value = sortByTitle(if (q.isEmpty()) loadScores() else searchScores(q))
         }
     }
 
@@ -41,7 +51,7 @@ class LibraryViewModel(
         searchJob = viewModelScope.launch {
             delay(debounceMs)
             val q = _query.value.trim()
-            _scores.value = if (q.isEmpty()) loadScores() else searchScores(q)
+            _scores.value = sortByTitle(if (q.isEmpty()) loadScores() else searchScores(q))
         }
     }
 

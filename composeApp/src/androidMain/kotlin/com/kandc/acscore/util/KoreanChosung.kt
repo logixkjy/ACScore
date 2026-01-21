@@ -37,4 +37,13 @@ object KoreanChosung {
         }
         return sb.toString()
     }
+
+    fun isChosung(ch: Char): Boolean = CHOSUNG.contains(ch)
+
+    fun initialOf(ch: Char): Char {
+        val index = (ch.code - '가'.code) / 588
+        return CHOSUNG[index]
+    }
+
+    fun indexOf(ch: Char): Int = CHOSUNG.indexOf(ch)
 }

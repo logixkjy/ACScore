@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -26,9 +27,7 @@ fun LibraryScreen(
         if (uri != null) vm.import(uri.toString())
     }
 
-    LaunchedEffect(Unit) {
-        vm.refresh()
-    }
+    LaunchedEffect(Unit) { vm.refresh() }
 
     if (error != null) {
         AlertDialog(
@@ -55,8 +54,8 @@ fun LibraryScreen(
     ) { padding ->
         Column(
             modifier = Modifier
-                .padding(padding)
                 .fillMaxSize()
+                .padding(padding)
         ) {
             // ✅ Search
             OutlinedTextField(
@@ -78,25 +77,45 @@ fun LibraryScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(if (query.isBlank()) "PDF를 Import 해주세요." else "검색 결과가 없어요.")
                 }
             } else {
+                // ✅ 섹션 구성 (scores 변경될 때만 재계산)
+                val sections = remember(scores) { buildSections(scores) }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(scores, key = { it.id }) { score ->
-                        ListItem(
-                            headlineContent = { Text(score.title) },
-                            supportingContent = { Text(score.fileName) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    // T2: PdfRenderer 뷰어 연결
-                                }
-                        )
-                        Divider()
+                    sections.forEach { (header, itemsInSection) ->
+
+                        // ✅ stickyHeader 대신 일반 item
+                        item(key = "header_$header") {
+                            Surface(tonalElevation = 2.dp) {
+                                Text(
+                                    text = header,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+
+                        items(itemsInSection, key = { it.id }) { score ->
+                            ListItem(
+                                headlineContent = { Text(score.title) },
+                                supportingContent = { Text(score.fileName) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        // T2
+                                    }
+                            )
+                            Divider()
+                        }
                     }
                 }
             }
