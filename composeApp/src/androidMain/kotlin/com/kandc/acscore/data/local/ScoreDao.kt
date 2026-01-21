@@ -11,6 +11,15 @@ interface ScoreDao {
     @Query("SELECT * FROM scores ORDER BY createdAt DESC")
     suspend fun getAll(): List<ScoreEntity>
 
+    // ✅ title LIKE 검색 (내림차순 유지)
+    @Query(
+        """
+        SELECT * FROM scores
+        WHERE title LIKE '%' || :query || '%' ESCAPE '\'
+        ORDER BY createdAt DESC
+        """
+    )
+    suspend fun searchByTitle(query: String): List<ScoreEntity>
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: ScoreEntity)
 }

@@ -18,6 +18,7 @@ fun LibraryScreen(
 ) {
     val scores by vm.scores.collectAsState()
     val error by vm.error.collectAsState()
+    val query by vm.query.collectAsState()
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -52,32 +53,46 @@ fun LibraryScreen(
             )
         }
     ) { padding ->
-        if (scores.isEmpty()) {
-            Box(
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
+            // ✅ Search
+            OutlinedTextField(
+                value = query,
+                onValueChange = vm::setQuery,
                 modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .padding(24.dp)
-            ) {
-                Text("PDF를 Import 해주세요.")
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-            ) {
-                items(scores, key = { it.id }) { score ->
-                    ListItem(
-                        headlineContent = { Text(score.title) },
-                        supportingContent = { Text(score.fileName) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                // T2: PdfRenderer 뷰어 연결
-                            }
-                    )
-                    Divider()
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                singleLine = true,
+                placeholder = { Text("제목 검색") }
+            )
+
+            if (scores.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp)
+                ) {
+                    Text(if (query.isBlank()) "PDF를 Import 해주세요." else "검색 결과가 없어요.")
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(scores, key = { it.id }) { score ->
+                        ListItem(
+                            headlineContent = { Text(score.title) },
+                            supportingContent = { Text(score.fileName) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // T2: PdfRenderer 뷰어 연결
+                                }
+                        )
+                        Divider()
+                    }
                 }
             }
         }

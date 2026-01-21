@@ -100,4 +100,19 @@ class AndroidScoreRepository(
         }
         return candidate
     }
+
+    override suspend fun searchScores(query: String): List<Score> =
+        runCatching {
+            val q = query.trim()
+            if (q.isEmpty()) {
+                dao.getAll().map { it.toModel() }
+            } else {
+                // LIKE 특수문자 방어(%, _, \)
+                val escaped = q
+                    .replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                dao.searchByTitle(escaped).map { it.toModel() }
+            }
+        }.getOrElse { emptyList() }
 }
