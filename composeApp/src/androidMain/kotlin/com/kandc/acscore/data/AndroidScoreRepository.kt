@@ -10,6 +10,7 @@ import com.kandc.acscore.data.model.Score
 import com.kandc.acscore.data.repository.ScoreRepository
 import java.io.File
 import java.util.UUID
+import com.kandc.acscore.util.KoreanChosung
 
 class AndroidScoreRepository(
     private val context: Context,
@@ -54,7 +55,17 @@ class AndroidScoreRepository(
 
             // insert 실패시(충돌 등) 파일도 정리해주면 좋음 → 최소 방어로 처리
             runCatching {
-                dao.insert(score.toEntity())
+                val chosung = KoreanChosung.extract(score.title)
+
+                dao.insert(
+                    ScoreEntity(
+                        id = score.id,
+                        title = score.title,
+                        fileName = score.fileName,
+                        chosung = chosung,
+                        createdAt = score.createdAt
+                    )
+                )
             }.onFailure {
                 runCatching { outFile.delete() }
                 throw it
@@ -74,6 +85,7 @@ class AndroidScoreRepository(
         id = id,
         title = title,
         fileName = fileName,
+        chosung = KoreanChosung.extract(title),
         createdAt = createdAt
     )
 
@@ -104,15 +116,22 @@ class AndroidScoreRepository(
     override suspend fun searchScores(query: String): List<Score> =
         runCatching {
             val q = query.trim()
-            if (q.isEmpty()) {
-                dao.getAll().map { it.toModel() }
-            } else {
-                // LIKE 특수문자 방어(%, _, \)
-                val escaped = q
-                    .replace("\\", "\\\\")
-                    .replace("%", "\\%")
-                    .replace("_", "\\_")
-                dao.searchByTitle(escaped).map { it.toModel() }
-            }
+            if (q.isEmpty()) return@runCatching dao.getAll().map { it.toModel() }
+
+            // title LIKE 안전 처리(%, _, \)
+            val safeTitle = q
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+
+            // 검색어에서 초성만 뽑아 같이 검색
+            val chosungQuery = KoreanChosung.extractOnlyChosung(q)
+
+            dao.searchCombined(
+                titleQuery = safeTitle,
+                chosungQuery = chosungQuery
+            ).map { it.toModel() }
         }.getOrElse { emptyList() }
+
+
 }

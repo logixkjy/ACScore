@@ -8,5 +8,6 @@ data class ScoreEntity(
     @PrimaryKey val id: String,
     val title: String,
     val fileName: String,
+    val chosung: String,
     val createdAt: Long
 )

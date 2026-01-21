@@ -20,6 +20,20 @@ interface ScoreDao {
         """
     )
     suspend fun searchByTitle(query: String): List<ScoreEntity>
+
+    @Query(
+        """
+    SELECT * FROM scores
+    WHERE title LIKE '%' || :titleQuery || '%' ESCAPE '\'
+       OR chosung LIKE '%' || :chosungQuery || '%'
+    ORDER BY createdAt DESC
+    """
+    )
+    suspend fun searchCombined(
+        titleQuery: String,
+        chosungQuery: String
+    ): List<ScoreEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: ScoreEntity)
 }
