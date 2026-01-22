@@ -33,7 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 @Composable
 fun LibraryScreen(
     vm: LibraryViewModel,
-    onOpenViewer: (scoreId: String, title: String, filePath: String) -> Unit
+    onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit
 ) {
     val scores by vm.scores.collectAsState()
     val error by vm.error.collectAsState()
@@ -210,12 +210,7 @@ fun LibraryScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable(enabled = !isImporting) {
-                                                val file = File(context.filesDir, "scores/${score.fileName}")
-                                                if (!file.exists()) {
-                                                    vm.emitError("파일이 존재하지 않아요: ${score.fileName}")
-                                                    return@clickable
-                                                }
-                                                onOpenViewer(score.id, score.title, file.absolutePath)
+                                                onOpenViewer(score.id, score.title, score.fileName)
                                             }
                                     )
                                     Divider()

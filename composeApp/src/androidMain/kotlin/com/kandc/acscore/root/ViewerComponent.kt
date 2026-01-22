@@ -10,6 +10,10 @@ interface ViewerComponent {
     fun selectTab(tabId: String)
     fun closeTab(tabId: String)
 
+    // ✅ 추가: 탭 추가 (A 정책에 필요)
+    fun addTab(request: ViewerOpenRequest, makeActive: Boolean = true)
+    fun addTabs(requests: List<ViewerOpenRequest>, initialActiveIndex: Int = 0)
+
     fun onBack()
 }
 
