@@ -110,4 +110,8 @@ class LibraryViewModel(
     fun consumeError() {
         _error.value = null
     }
+
+    fun emitError(message: String) {
+        _error.value = message
+    }
 }

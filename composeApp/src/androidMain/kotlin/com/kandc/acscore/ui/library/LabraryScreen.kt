@@ -25,11 +25,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.floor
+import android.content.Context
+import java.io.File
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    vm: LibraryViewModel
+    vm: LibraryViewModel,
+    onOpenViewer: (scoreId: String, title: String, filePath: String) -> Unit
 ) {
     val scores by vm.scores.collectAsState()
     val error by vm.error.collectAsState()
@@ -78,6 +82,8 @@ fun LibraryScreen(
     // ✅ (1) 인덱스 클릭/자동 강조 하이라이트 상태
     var selectedIndexKey by remember { mutableStateOf<String?>(null) }
     var activeIndexKey by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -204,7 +210,12 @@ fun LibraryScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable(enabled = !isImporting) {
-                                                // T2
+                                                val file = File(context.filesDir, "scores/${score.fileName}")
+                                                if (!file.exists()) {
+                                                    vm.emitError("파일이 존재하지 않아요: ${score.fileName}")
+                                                    return@clickable
+                                                }
+                                                onOpenViewer(score.id, score.title, file.absolutePath)
                                             }
                                     )
                                     Divider()

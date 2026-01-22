@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.ksp)
+    id("kotlin-parcelize")
 }
 
 kotlin {
@@ -70,5 +71,11 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     add("kspAndroid", libs.androidx.room.compiler)
+    implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
+    implementation("androidx.collection:collection:1.4.3")
+    // Decompose
+    implementation("com.arkivanov.decompose:decompose:2.2.1")
+    implementation("com.arkivanov.decompose:extensions-compose-jetpack:2.2.1")
+    implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
 }
 
