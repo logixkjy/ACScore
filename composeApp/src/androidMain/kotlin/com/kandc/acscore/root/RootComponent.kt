@@ -8,6 +8,8 @@ interface RootComponent {
     val stack: Value<ChildStack<RootConfig, Child>>
 
     fun openViewer(request: ViewerOpenRequest)
+    fun openViewerMany(requests: List<ViewerOpenRequest>, initialIndex: Int = 0)
+
     fun onBack()
 
     sealed interface Child {

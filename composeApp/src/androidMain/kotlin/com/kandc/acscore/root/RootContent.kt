@@ -4,8 +4,8 @@ import androidx.compose.runtime.Composable
 import com.arkivanov.decompose.extensions.compose.jetpack.stack.Children
 import com.arkivanov.decompose.extensions.compose.jetpack.stack.animation.stackAnimation
 import com.kandc.acscore.ui.library.LibraryScreen
-import com.kandc.acscore.viewer.ui.PdfViewerScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
+import com.kandc.acscore.viewer.ui.TabbedViewerScreen
 
 @Composable
 fun RootContent(component: RootComponent) {
@@ -29,7 +29,7 @@ fun RootContent(component: RootComponent) {
                 )
             }
             is RootComponent.Child.Viewer -> {
-                PdfViewerScreen(request = instance.component.request)
+                TabbedViewerScreen(component = instance.component)
             }
         }
     }

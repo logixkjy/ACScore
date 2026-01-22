@@ -26,13 +26,18 @@ class RootComponentImpl(
         )
 
     override fun openViewer(request: ViewerOpenRequest) {
-        navigation.push(
-            RootConfig.Viewer(
-                scoreId = request.scoreId,
-                title = request.title,
-                filePath = request.filePath
+        openViewerMany(listOf(request), initialIndex = 0)
+    }
+
+    override fun openViewerMany(requests: List<ViewerOpenRequest>, initialIndex: Int) {
+        val items = requests.map {
+            RootConfig.Viewer.ViewerItem(
+                scoreId = it.scoreId,
+                title = it.title,
+                filePath = it.filePath
             )
-        )
+        }
+        navigation.push(RootConfig.Viewer(items = items, initialActiveIndex = initialIndex))
     }
 
     override fun onBack() {
@@ -55,14 +60,19 @@ class RootComponentImpl(
             }
 
             is RootConfig.Viewer -> {
+                // ViewerComponent가 탭 상태를 내부에서 관리하도록 초기 요청들 전달
+                val initialRequests = config.items.map {
+                    ViewerOpenRequest(
+                        scoreId = it.scoreId,
+                        title = it.title,
+                        filePath = it.filePath
+                    )
+                }
                 RootComponent.Child.Viewer(
                     ViewerComponentImpl(
                         componentContext = childContext,
-                        request = ViewerOpenRequest(
-                            scoreId = config.scoreId,
-                            title = config.title,
-                            filePath = config.filePath
-                        ),
+                        initialRequests = initialRequests,
+                        initialActiveIndex = config.initialActiveIndex,
                         onBack = ::onBack
                     )
                 )

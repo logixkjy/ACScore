@@ -9,13 +9,21 @@ sealed interface RootConfig : Parcelable {
     @Parcelize
     data object Library : RootConfig
 
+    /**
+     * Viewer 진입 시 초기 탭들.
+     * - MVP: list size = 1
+     * - Setlist: 여러 개 전달
+     */
     @Parcelize
     data class Viewer(
-        val scoreId: String,
-        val title: String,
-        val filePath: String
-    ) : RootConfig
-
-    // T5부터 추가 예정
-    // @Serializable data object Setlist : RootConfig
+        val items: List<ViewerItem>,
+        val initialActiveIndex: Int = 0
+    ) : RootConfig {
+        @Parcelize
+        data class ViewerItem(
+            val scoreId: String,
+            val title: String,
+            val filePath: String
+        ) : Parcelable
+    }
 }

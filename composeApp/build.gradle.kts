@@ -21,6 +21,11 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.activity.compose)
+
+            implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
+            implementation("androidx.collection:collection:1.4.3")
+            implementation("com.arkivanov.decompose:decompose:2.2.1")
+            implementation("com.arkivanov.decompose:extensions-compose-jetpack:2.2.1")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -32,6 +37,8 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(projects.shared)
+
+            implementation(compose.materialIconsExtended)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -71,11 +78,5 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     add("kspAndroid", libs.androidx.room.compiler)
-    implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
-    implementation("androidx.collection:collection:1.4.3")
-    // Decompose
-    implementation("com.arkivanov.decompose:decompose:2.2.1")
-    implementation("com.arkivanov.decompose:extensions-compose-jetpack:2.2.1")
-    implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
 }
 
