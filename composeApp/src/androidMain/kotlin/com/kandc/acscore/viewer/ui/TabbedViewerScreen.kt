@@ -34,16 +34,26 @@ fun TabbedViewerScreen(
     Column(modifier.fillMaxSize()) {
 
         if (controlsVisible) {
-            // 상단 컨트롤 바
+            // ✅ 상단 컨트롤 바 (status bar 고려 + 버튼이 위로 쏠리지 않게 "아래로" 내려줌)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .statusBarsPadding()               // ✅ 상태바 영역 확보
+                    .padding(horizontal = 10.dp)       // 좌우 패딩
+                    .padding(top = 10.dp, bottom = 10.dp), // ✅ 아래로 내려온 느낌(특히 top)
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onRequestOpenLibrary) { Text("Library") }
+                TextButton(
+                    onClick = onRequestOpenLibrary,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp) // ✅ 버튼 자체도 살짝 "두툼"
+                ) { Text("Library") }
+
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { controlsVisible = false }) { Text("Hide") }
+
+                TextButton(
+                    onClick = { controlsVisible = false },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                ) { Text("Hide") }
             }
 
             // 탭 바
@@ -51,7 +61,7 @@ fun TabbedViewerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp), // ✅ 살짝 여유
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -102,17 +112,14 @@ fun TabbedViewerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(active.tabId) {
-                    detectTapGestures(
-                        onTap = { controlsVisible = !controlsVisible }
-                    )
+                    detectTapGestures(onTap = { controlsVisible = !controlsVisible })
                 }
         ) {
             PdfViewerScreen(
                 request = active.request,
                 modifier = Modifier.fillMaxSize(),
-                initialPage = active.lastPage, // ✅ 복원
+                initialPage = active.lastPage,
                 onPageChanged = { page ->
-                    // ✅ 저장 (재시작 복원까지 연결됨)
                     sessionStore.updateLastPage(active.tabId, page)
                 }
             )

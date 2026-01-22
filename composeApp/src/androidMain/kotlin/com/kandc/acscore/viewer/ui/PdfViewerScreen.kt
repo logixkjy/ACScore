@@ -10,6 +10,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -178,15 +179,50 @@ private fun PageImage(
     var bitmap by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Bitmap?>(null) }
     var error by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Throwable?>(null) }
 
-    LaunchedEffect(fileKey, pageIndex, targetWidthPx) {
+    // ✅ 수동 재시도 트리거
+    var retryTick by remember(fileKey, pageIndex, targetWidthPx) { mutableIntStateOf(0) }
+
+    // ✅ 로딩 상태 (UI 안정)
+    var isLoading by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf(false) }
+
+    LaunchedEffect(fileKey, pageIndex, targetWidthPx, retryTick) {
         bitmap = null
         error = null
+        isLoading = true
+
+        fun log(t: Throwable, attempt: Int) {
+            android.util.Log.w(
+                "PdfViewer",
+                "render failed fileKey=$fileKey page=$pageIndex width=$targetWidthPx attempt=$attempt : " +
+                        "${t.javaClass.simpleName} ${t.message}",
+                t
+            )
+        }
+
         try {
-            bitmap = loader.loadPage(pageIndex, targetWidthPx)
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (t: Throwable) {
-            error = t
+            // ✅ 1회 자동 재시도 (총 2회 시도)
+            repeat(2) { attempt0 ->
+                val attempt = attempt0 + 1
+                try {
+                    val bmp = loader.loadPage(pageIndex, targetWidthPx)
+                    bitmap = bmp
+                    error = null
+                    return@LaunchedEffect
+                } catch (ce: CancellationException) {
+                    // ✅ 탭 전환/리컴포즈로 취소는 정상
+                    throw ce
+                } catch (t: Throwable) {
+                    log(t, attempt)
+                    if (attempt0 == 0) {
+                        // 아주 짧게 쉬고 재시도 (Pager 프리패치/일시 IO 대비)
+                        kotlinx.coroutines.delay(80)
+                    } else {
+                        error = t
+                    }
+                }
+            }
+        } finally {
+            isLoading = false
         }
     }
 
@@ -200,27 +236,46 @@ private fun PageImage(
                     .wrapContentHeight(Alignment.CenterVertically)
             )
         }
+
         error != null -> {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(220.dp),
-                contentAlignment = Alignment.Center
+                    .height(240.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "페이지 로딩 실패: ${error?.message ?: "unknown"}",
-                    style = MaterialTheme.typography.bodySmall
+                    text = "페이지 로딩 실패",
+                    style = MaterialTheme.typography.bodyMedium
                 )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "page=${pageIndex + 1} / width=$targetWidthPx",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                TextButton(
+                    onClick = { retryTick++ }
+                ) { Text("다시 시도") }
             }
         }
+
         else -> {
+            // 로딩 중(초기/재시도)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(220.dp),
+                    .height(240.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator()
+                if (isLoading) {
+                    CircularProgressIndicator()
+                } else {
+                    // 거의 안 오지만, 상태 불일치 대비
+                    CircularProgressIndicator()
+                }
             }
         }
     }
