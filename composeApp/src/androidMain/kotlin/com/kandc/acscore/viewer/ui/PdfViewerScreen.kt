@@ -2,9 +2,11 @@ package com.kandc.acscore.viewer.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -21,37 +23,35 @@ import com.kandc.acscore.viewer.data.PdfPageLoader
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.CancellationException
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PdfViewerScreen(
     request: ViewerOpenRequest,
     modifier: Modifier = Modifier,
+    initialPage: Int = 0,
+    onPageChanged: (Int) -> Unit = {},
     onError: (Throwable) -> Unit = {}
 ) {
     val layout = rememberViewerLayout()
-    val gapDp = 12.dp
 
-    // 파일별 캐시 키(경로 변경/동일경로 케이스 대응)
+    // “책 넘김” 느낌 튜닝값
+    val sidePadding = 20.dp
+    val pageSpacing = 10.dp
+    val twoUpInnerGap = 12.dp
+
     val fileKey = remember(request.filePath) { request.filePath.hashCode().toString() }
 
     val cache = remember { PdfBitmapCache.default() }
     val holder = remember(request.filePath) { AndroidPdfRendererHolder(request.filePath) }
 
     DisposableEffect(holder) {
-        runCatching { holder.open() }
-            .onFailure { onError(it) }
-
-        onDispose {
-            holder.close()
-            // 탭 유지(T2-3)로 갈 때는 탭별 캐시 유지/정책을 따로 잡을 수 있음
-            // 지금은 단일 화면 기준으로 유지해도 됨. 필요하면 clear 호출.
-            // cache.clear()
-        }
+        runCatching { holder.open() }.onFailure(onError)
+        onDispose { holder.close() }
     }
 
-    val pageCount = remember { mutableStateOf(0) }
+    var pageCount by remember(holder) { mutableStateOf(0) }
     LaunchedEffect(holder) {
-        runCatching { pageCount.value = holder.pageCount() }
-            .onFailure { onError(it) }
+        runCatching { pageCount = holder.pageCount() }.onFailure(onError)
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -60,11 +60,9 @@ fun PdfViewerScreen(
 
         val targetPageWidthPx = remember(layout.columns, maxWidthPx) {
             if (layout.columns == 2) {
-                // 2-up: (전체폭 - gap) / 2
-                val gapPx = with(density) { gapDp.toPx() }
+                val gapPx = with(density) { twoUpInnerGap.toPx() }
                 ((maxWidthPx - gapPx) / 2f).toInt().coerceAtLeast(1)
             } else {
-                // 1-up: 전체폭 fit-width
                 maxWidthPx.toInt().coerceAtLeast(1)
             }
         }
@@ -73,102 +71,96 @@ fun PdfViewerScreen(
             PdfPageLoader(holder = holder, cache = cache, fileKey = fileKey)
         }
 
-        Column(Modifier.fillMaxSize()) {
-            // 상단 타이틀(원하면 TopAppBar로 교체)
-            Text(
-                text = request.title,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-            )
+        if (pageCount <= 0) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return@BoxWithConstraints
+        }
 
-            if (pageCount.value <= 0) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+        val pagerPageCount = if (layout.columns == 2) {
+            (pageCount + 1) / 2 // rowCount
+        } else {
+            pageCount
+        }
+
+        val startPage = remember(request.filePath, layout.columns, pageCount, initialPage) {
+            val safe = initialPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+            if (layout.columns == 2) (safe / 2).coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
+            else safe.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
+        }
+
+        val pagerState = rememberPagerState(
+            initialPage = startPage,
+            pageCount = { pagerPageCount }
+        )
+
+        // PDF/레이아웃 변경 시 해당 페이지로 이동(탭 전환 대응)
+        LaunchedEffect(request.filePath, layout.columns, pagerPageCount, startPage) {
+            runCatching { pagerState.scrollToPage(startPage) }
+        }
+
+        // 현재 페이지 저장
+        LaunchedEffect(request.filePath, layout.columns, pagerState.currentPage) {
+            val current = if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
+            onPageChanged(current.coerceAtLeast(0))
+        }
+
+        // Pager: 드래그 릴리즈에도 “항상” 페이지 단위로 스냅됨
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            pageSize = PageSize.Fill,
+            contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
+            pageSpacing = pageSpacing
+        ) { page ->
+            if (layout.columns == 1) {
+                // 1-up: page == 실제 페이지 index
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    PageImage(
+                        fileKey = fileKey,
+                        pageIndex = page,
+                        targetWidthPx = targetPageWidthPx,
+                        loader = loader
+                    )
                 }
             } else {
-                if (layout.columns == 1) {
-                    SingleColumnPages(
-                        pageCount = pageCount.value,
-                        targetWidthPx = targetPageWidthPx,
-                        loader = loader
-                    )
-                } else {
-                    TwoColumnPages(
-                        pageCount = pageCount.value,
-                        targetWidthPx = targetPageWidthPx,
-                        gapDp = gapDp,
-                        loader = loader
-                    )
-                }
-            }
-        }
-    }
-}
+                // 2-up: page == rowIndex
+                val left = page * 2
+                val right = left + 1
 
-@Composable
-private fun SingleColumnPages(
-    pageCount: Int,
-    targetWidthPx: Int,
-    loader: PdfPageLoader
-) {
-    val indices = remember(pageCount) { (0 until pageCount).toList() }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(items = indices, key = { it }) { pageIndex ->
-            PageImage(
-                pageIndex = pageIndex,
-                targetWidthPx = targetWidthPx,
-                loader = loader
-            )
-        }
-    }
-}
-
-@Composable
-private fun TwoColumnPages(
-    pageCount: Int,
-    targetWidthPx: Int,
-    gapDp: Dp,
-    loader: PdfPageLoader
-) {
-    val rowCount = remember(pageCount) { (pageCount + 1) / 2 }
-    val rows = remember(rowCount) { (0 until rowCount).toList() }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(items = rows, key = { it }) { rowIndex ->
-            val left = rowIndex * 2
-            val right = left + 1
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(gapDp)
-            ) {
-                Box(Modifier.weight(1f)) {
-                    PageImage(
-                        pageIndex = left,
-                        targetWidthPx = targetWidthPx,
-                        loader = loader
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    if (right < pageCount) {
-                        PageImage(
-                            pageIndex = right,
-                            targetWidthPx = targetWidthPx,
-                            loader = loader
-                        )
-                    } else {
-                        Spacer(Modifier.fillMaxWidth())
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            PageImage(
+                                fileKey = fileKey,
+                                pageIndex = left,
+                                targetWidthPx = targetPageWidthPx,
+                                loader = loader
+                            )
+                        }
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            if (right < pageCount) {
+                                PageImage(
+                                    fileKey = fileKey,
+                                    pageIndex = right,
+                                    targetWidthPx = targetPageWidthPx,
+                                    loader = loader
+                                )
+                            } else {
+                                Spacer(Modifier.fillMaxSize())
+                            }
+                        }
                     }
                 }
             }
@@ -178,20 +170,20 @@ private fun TwoColumnPages(
 
 @Composable
 private fun PageImage(
+    fileKey: String,
     pageIndex: Int,
     targetWidthPx: Int,
     loader: PdfPageLoader
 ) {
-    var bitmap by remember(pageIndex, targetWidthPx) { mutableStateOf<Bitmap?>(null) }
-    var error by remember(pageIndex, targetWidthPx) { mutableStateOf<Throwable?>(null) }
+    var bitmap by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Bitmap?>(null) }
+    var error by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Throwable?>(null) }
 
-    LaunchedEffect(pageIndex, targetWidthPx) {
+    LaunchedEffect(fileKey, pageIndex, targetWidthPx) {
         bitmap = null
         error = null
         try {
             bitmap = loader.loadPage(pageIndex, targetWidthPx)
         } catch (ce: CancellationException) {
-            // 스크롤/리컴포즈로 취소될 수 있음(정상)
             throw ce
         } catch (t: Throwable) {
             error = t
@@ -203,7 +195,9 @@ private fun PageImage(
             Image(
                 bitmap = requireNotNull(bitmap).asImageBitmap(),
                 contentDescription = "page $pageIndex",
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(Alignment.CenterVertically)
             )
         }
         error != null -> {

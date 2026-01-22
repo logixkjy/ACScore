@@ -1,33 +1,30 @@
 package com.kandc.acscore.root
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.kandc.acscore.ui.library.LibraryScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import com.kandc.acscore.viewer.ui.TabbedViewerScreen
 import java.io.File
-import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun MainHostScreen(component: RootComponent) {
     val overlayOpen by component.isLibraryOverlayOpen.collectAsState()
 
     Box(Modifier.fillMaxSize()) {
-        // 1) 아래: Viewer
+        // 아래: Viewer
         TabbedViewerScreen(
             sessionStore = component.viewerSessionStore,
-            onRequestOpenLibrary = { component.openLibraryOverlay() }
+            onRequestOpenLibrary = { component.openLibraryOverlay() },
+            modifier = Modifier.fillMaxSize()
         )
 
-        // 2) 위: Library Overlay (2/3 패널 + 상단 1/3 반투명)
+        // 위: Library Overlay
         LibraryOverlay(
             visible = overlayOpen,
             onDismiss = { component.closeLibraryOverlay() }

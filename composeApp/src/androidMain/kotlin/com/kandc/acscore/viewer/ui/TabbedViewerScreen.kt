@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.kandc.acscore.viewer.session.ViewerSessionStore
+import androidx.compose.foundation.layout.statusBarsPadding
 
 @Composable
 fun TabbedViewerScreen(
@@ -34,6 +35,7 @@ fun TabbedViewerScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -52,9 +54,14 @@ fun TabbedViewerScreen(
             ) {
                 state.tabs.forEach { tab ->
                     val selected = tab.tabId == active?.tabId
+
                     Surface(
                         tonalElevation = if (selected) 4.dp else 1.dp,
-                        shape = MaterialTheme.shapes.medium
+                        shape = MaterialTheme.shapes.medium,
+                        color = if (selected)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -63,6 +70,10 @@ fun TabbedViewerScreen(
                             Text(
                                 text = tab.request.title,
                                 style = MaterialTheme.typography.labelMedium,
+                                color = if (selected)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .padding(end = 8.dp)
                                     .clickable { sessionStore.setActive(tab.tabId) }
@@ -70,6 +81,10 @@ fun TabbedViewerScreen(
                             Text(
                                 text = "✕",
                                 style = MaterialTheme.typography.labelMedium,
+                                color = if (selected)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clickable { sessionStore.closeTab(tab.tabId) }
                             )
                         }
@@ -96,14 +111,16 @@ fun TabbedViewerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { controlsVisible = !controlsVisible }
-                    )
+                    detectTapGestures(onTap = { controlsVisible = !controlsVisible })
                 }
         ) {
             PdfViewerScreen(
                 request = active.request,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                initialPage = active.lastPage, // ✅ 마지막 페이지 복원
+                onPageChanged = { page ->
+                    sessionStore.updateLastPage(active.tabId, page) // ✅ 현재 페이지 저장
+                }
             )
         }
     }

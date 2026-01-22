@@ -8,20 +8,19 @@ import com.arkivanov.decompose.value.Value
 import com.kandc.acscore.ui.library.LibraryViewModel
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import com.kandc.acscore.viewer.session.ViewerSessionStore
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class RootComponentImpl(
     componentContext: ComponentContext,
-    override val libraryViewModel: LibraryViewModel
+    override val libraryViewModel: LibraryViewModel,
+    override val viewerSessionStore: ViewerSessionStore,
+    private val rootUiViewModel: RootUiViewModel
 ) : RootComponent, ComponentContext by componentContext {
 
     private val navigation = StackNavigation<RootConfig>()
 
-    override val viewerSessionStore: ViewerSessionStore = ViewerSessionStore()
-
-    private val _isLibraryOverlayOpen = MutableStateFlow(true) // ✅ 피아스코어처럼 시작 시 열림
-    override val isLibraryOverlayOpen: StateFlow<Boolean> = _isLibraryOverlayOpen
+    override val isLibraryOverlayOpen: StateFlow<Boolean> =
+        rootUiViewModel.isLibraryOverlayOpen
 
     override val stack: Value<ChildStack<RootConfig, RootComponent.Child>> =
         childStack(
@@ -33,15 +32,16 @@ class RootComponentImpl(
         }
 
     override fun openLibraryOverlay() {
-        _isLibraryOverlayOpen.value = true
+        rootUiViewModel.openLibraryOverlay(userInitiated = true)
     }
 
     override fun closeLibraryOverlay() {
-        _isLibraryOverlayOpen.value = false
+        rootUiViewModel.closeLibraryOverlay(userInitiated = true)
     }
 
     override fun onScoreSelected(request: ViewerOpenRequest) {
         viewerSessionStore.openOrActivate(request)
-        closeLibraryOverlay()
+        // ✅ 악보 선택으로 닫힌 것도 “다시 자동으로 열지 않음”에 포함
+        rootUiViewModel.onScoreSelectedAndCloseOverlay()
     }
 }
