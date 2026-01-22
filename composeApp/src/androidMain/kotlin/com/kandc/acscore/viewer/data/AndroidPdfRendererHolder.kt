@@ -5,11 +5,6 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import java.io.File
 
-/**
- * PdfRenderer / ParcelFileDescriptor 리소스 안전 관리.
- * - open/close는 UI 생명주기(DisposableEffect)에서 호출 권장
- * - page 렌더링 시 page.open/close는 함수 내부에서 안전 처리
- */
 class AndroidPdfRendererHolder(
     private val filePath: String
 ) {
@@ -18,44 +13,55 @@ class AndroidPdfRendererHolder(
 
     fun open() {
         if (renderer != null) return
-        val file = File(filePath)
-        require(file.exists()) { "PDF file not found: $filePath" }
 
-        pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        renderer = PdfRenderer(requireNotNull(pfd))
-    }
+        synchronized(this) {
+            if (renderer != null) return
 
-    fun close() {
-        runCatching { renderer?.close() }
-        runCatching { pfd?.close() }
-        renderer = null
-        pfd = null
+            val file = File(filePath)
+            require(file.exists()) { "PDF not found: $filePath" }
+
+            val newPfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val newRenderer = PdfRenderer(newPfd)
+
+            pfd = newPfd
+            renderer = newRenderer
+        }
     }
 
     fun pageCount(): Int = renderer?.pageCount ?: 0
 
-    fun renderPageFitWidth(pageIndex: Int, targetWidthPx: Int): Bitmap {
-        val r = renderer ?: error("PdfRenderer not opened. Call open() first.")
-        require(pageIndex in 0 until r.pageCount) { "Invalid pageIndex=$pageIndex" }
-        require(targetWidthPx > 0) { "targetWidthPx must be > 0" }
+    fun renderPage(pageIndex: Int, targetWidthPx: Int): Bitmap {
+        val r = renderer ?: throw IllegalStateException("PdfRenderer is not opened")
+        if (pageIndex !in 0 until r.pageCount) {
+            throw IndexOutOfBoundsException("pageIndex=$pageIndex, pageCount=${r.pageCount}")
+        }
 
-        val page = r.openPage(pageIndex)
+        var page: PdfRenderer.Page? = null
         try {
-            val pageW = page.width.toFloat()
-            val pageH = page.height.toFloat()
+            page = r.openPage(pageIndex)
 
-            val scale = targetWidthPx / pageW
-            val targetHeightPx = (pageH * scale).toInt().coerceAtLeast(1)
+            val srcW = page.width.coerceAtLeast(1)
+            val srcH = page.height.coerceAtLeast(1)
 
-            // 안전장치(너무 큰 PDF에서 OOM 방지). 필요 시 조정.
-            val safeW = targetWidthPx.coerceAtMost(4096)
-            val safeH = targetHeightPx.coerceAtMost(4096)
+            val scale = targetWidthPx.toFloat() / srcW.toFloat()
+            val outW = (srcW * scale).toInt().coerceAtLeast(1)
+            val outH = (srcH * scale).toInt().coerceAtLeast(1)
 
-            val bitmap = Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             return bitmap
         } finally {
-            page.close()
+            runCatching { page?.close() }
+        }
+    }
+
+    fun close() {
+        synchronized(this) {
+            runCatching { renderer?.close() }
+            renderer = null
+
+            runCatching { pfd?.close() }
+            pfd = null
         }
     }
 }
