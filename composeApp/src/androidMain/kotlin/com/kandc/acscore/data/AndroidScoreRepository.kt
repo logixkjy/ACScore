@@ -133,4 +133,25 @@ class AndroidScoreRepository(
                 chosungQueryNoSpace = chosungNoSpace
             ).map { it.toModel() }
         }.getOrElse { emptyList() }
+
+    override suspend fun deleteScore(id: String): Result<Unit> =
+        runCatching {
+            val entity = dao.findById(id) ?: return@runCatching
+
+            // 1) 파일 삭제 (없어도 실패 아님)
+            val pdf = File(File(context.filesDir, "scores"), entity.fileName)
+            runCatching { if (pdf.exists()) pdf.delete() }
+
+            // 2) DB 삭제
+            dao.deleteById(id)
+        }
+
+    override suspend fun renameScoreTitle(id: String, newTitle: String): Result<Unit> =
+        runCatching {
+            val title = newTitle.trim()
+            if (title.isBlank()) error("Title is blank")
+
+            val chosung = KoreanChosung.extract(title)
+            dao.updateTitle(id = id, title = title, chosung = chosung)
+        }
 }

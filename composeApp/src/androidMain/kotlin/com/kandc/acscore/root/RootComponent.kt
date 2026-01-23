@@ -2,7 +2,7 @@ package com.kandc.acscore.root
 
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
-import com.kandc.acscore.ui.library.LibraryViewModel
+import com.kandc.acscore.library.ui.LibraryViewModel
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import com.kandc.acscore.viewer.session.ViewerSessionStore
 import kotlinx.coroutines.flow.StateFlow

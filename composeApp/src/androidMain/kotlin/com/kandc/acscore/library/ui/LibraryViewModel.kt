@@ -1,4 +1,4 @@
-package com.kandc.acscore.ui.library
+package com.kandc.acscore.library.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -6,6 +6,8 @@ import com.kandc.acscore.data.model.Score
 import com.kandc.acscore.domain.ImportScoreUseCase
 import com.kandc.acscore.domain.LoadScoresUseCase
 import com.kandc.acscore.domain.SearchScoresUseCase
+import com.kandc.acscore.library.domain.DeleteScoreUseCase
+import com.kandc.acscore.library.domain.RenameScoreTitleUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,6 +23,8 @@ class LibraryViewModel(
     private val loadScores: LoadScoresUseCase,
     private val importScore: ImportScoreUseCase,
     private val searchScores: SearchScoresUseCase,
+    private val deleteScoreUseCase: DeleteScoreUseCase,                 // ✅ 추가
+    private val renameScoreTitleUseCase: RenameScoreTitleUseCase        // ✅ 추가
 ) : ViewModel() {
 
     private val _scores = MutableStateFlow<List<Score>>(emptyList())
@@ -32,7 +36,6 @@ class LibraryViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
-    // ✅ Import 진행 상태 (검은 화면/무반응처럼 보이는 문제 해결용)
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
@@ -63,27 +66,17 @@ class LibraryViewModel(
         }
     }
 
-    fun clearQuery() {
-        setQuery("")
-    }
+    fun clearQuery() = setQuery("")
 
-    /**
-     * ✅ 다중 선택 Import 지원
-     * - 내부적으로 기존 importScore(uri) 유스케이스를 여러 번 호출
-     * - 무거운 작업은 IO로 보내고, UI에는 isImporting으로 로딩 표시
-     */
     fun importUris(uriStrings: List<String>) {
         val list = uriStrings.filter { it.isNotBlank() }
         if (list.isEmpty()) return
 
         viewModelScope.launch {
-            if (_isImporting.value) return@launch // 중복 실행 방지
+            if (_isImporting.value) return@launch
             _isImporting.value = true
-
             try {
-                // import 자체가 무거울 수 있으니 IO에서 실행
                 val result = withContext(Dispatchers.IO) {
-                    // 하나라도 실패하면 즉시 실패로 처리(원하면 부분 성공 로직으로 확장 가능)
                     for (uri in list) {
                         val r = importScore(uri)
                         if (r.isFailure) return@withContext r
@@ -100,18 +93,26 @@ class LibraryViewModel(
         }
     }
 
-    /**
-     * 기존 단일 Import는 유지하되, 내부적으로 다중 Import로 위임
-     */
-    fun import(uriString: String) {
-        importUris(listOf(uriString))
+    fun import(uriString: String) = importUris(listOf(uriString))
+
+    fun consumeError() { _error.value = null }
+    fun emitError(message: String) { _error.value = message }
+
+    // ✅ T3: 삭제
+    fun deleteScore(id: String) {
+        viewModelScope.launch {
+            deleteScoreUseCase(id)
+                .onSuccess { refresh() }
+                .onFailure { _error.value = it.message ?: "삭제 실패" }
+        }
     }
 
-    fun consumeError() {
-        _error.value = null
-    }
-
-    fun emitError(message: String) {
-        _error.value = message
+    // ✅ T3: 이름 변경(title)
+    fun renameTitle(id: String, newTitle: String) {
+        viewModelScope.launch {
+            renameScoreTitleUseCase(id, newTitle)
+                .onSuccess { refresh() }
+                .onFailure { _error.value = it.message ?: "이름 변경 실패" }
+        }
     }
 }

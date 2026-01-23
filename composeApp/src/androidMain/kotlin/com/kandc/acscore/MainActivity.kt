@@ -14,12 +14,14 @@ import com.kandc.acscore.data.local.DbProvider
 import com.kandc.acscore.domain.ImportScoreUseCase
 import com.kandc.acscore.domain.LoadScoresUseCase
 import com.kandc.acscore.domain.SearchScoresUseCase
+import com.kandc.acscore.library.domain.DeleteScoreUseCase
+import com.kandc.acscore.library.domain.RenameScoreTitleUseCase
 import com.kandc.acscore.root.MainHostScreen
 import com.kandc.acscore.root.RootComponent
 import com.kandc.acscore.root.RootComponentImpl
 import com.kandc.acscore.root.RootUiViewModel
-import com.kandc.acscore.ui.library.LibraryViewModel
-import com.kandc.acscore.ui.library.LibraryViewModelFactory
+import com.kandc.acscore.library.ui.LibraryViewModel
+import com.kandc.acscore.library.ui.LibraryViewModelFactory
 import com.kandc.acscore.viewer.session.ViewerSessionViewModel
 
 class MainActivity : ComponentActivity() {
@@ -34,9 +36,11 @@ class MainActivity : ComponentActivity() {
         val load = LoadScoresUseCase(repo)
         val import = ImportScoreUseCase(repo)
         val search = SearchScoresUseCase(repo)
+        val delete = DeleteScoreUseCase(repo)
+        val rename = RenameScoreTitleUseCase(repo)
 
         // Library VM (Activity scope)
-        val libraryVmFactory = LibraryViewModelFactory(load, import, search)
+        val libraryVmFactory = LibraryViewModelFactory(load, import, search, delete, rename)
         val libraryViewModel: LibraryViewModel =
             ViewModelProvider(this, libraryVmFactory)[LibraryViewModel::class.java]
 

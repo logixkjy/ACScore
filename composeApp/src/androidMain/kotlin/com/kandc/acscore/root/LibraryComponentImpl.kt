@@ -1,7 +1,7 @@
 package com.kandc.acscore.root
 
 import com.arkivanov.decompose.ComponentContext
-import com.kandc.acscore.ui.library.LibraryViewModel
+import com.kandc.acscore.library.ui.LibraryViewModel
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 
 class LibraryComponentImpl(

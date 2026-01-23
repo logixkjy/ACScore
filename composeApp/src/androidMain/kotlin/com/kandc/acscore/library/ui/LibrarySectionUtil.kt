@@ -1,4 +1,4 @@
-package com.kandc.acscore.ui.library
+package com.kandc.acscore.library.ui
 
 import com.kandc.acscore.data.model.Score
 import com.kandc.acscore.util.KoreanChosung

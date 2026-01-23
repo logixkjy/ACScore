@@ -38,4 +38,13 @@ interface ScoreDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: ScoreEntity)
+
+    @Query("SELECT * FROM scores WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): ScoreEntity?
+
+    @Query("DELETE FROM scores WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("UPDATE scores SET title = :title, chosung = :chosung WHERE id = :id")
+    suspend fun updateTitle(id: String, title: String, chosung: String)
 }

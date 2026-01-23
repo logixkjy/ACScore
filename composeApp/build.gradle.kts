@@ -26,6 +26,7 @@ kotlin {
             implementation("androidx.collection:collection:1.4.3")
             implementation("com.arkivanov.decompose:decompose:2.2.1")
             implementation("com.arkivanov.decompose:extensions-compose-jetpack:2.2.1")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

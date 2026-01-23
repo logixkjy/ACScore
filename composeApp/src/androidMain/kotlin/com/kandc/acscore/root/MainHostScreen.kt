@@ -7,7 +7,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.kandc.acscore.ui.library.LibraryScreen
+import com.kandc.acscore.library.ui.LibraryScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import com.kandc.acscore.viewer.ui.TabbedViewerScreen
 import java.io.File
