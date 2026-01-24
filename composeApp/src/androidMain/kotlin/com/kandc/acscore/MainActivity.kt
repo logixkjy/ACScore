@@ -11,18 +11,18 @@ import androidx.lifecycle.ViewModelProvider
 import com.arkivanov.decompose.defaultComponentContext
 import com.kandc.acscore.data.AndroidScoreRepository
 import com.kandc.acscore.data.local.DbProvider
-import com.kandc.acscore.domain.ImportScoreUseCase
-import com.kandc.acscore.domain.LoadScoresUseCase
-import com.kandc.acscore.domain.SearchScoresUseCase
-import com.kandc.acscore.library.domain.DeleteScoreUseCase
-import com.kandc.acscore.library.domain.RenameScoreTitleUseCase
+import com.kandc.acscore.shard.domain.usecase.ImportScoreUseCase
+import com.kandc.acscore.shard.domain.usecase.LoadScoresUseCase
+import com.kandc.acscore.shard.domain.usecase.SearchScoresUseCase
+import com.kandc.acscore.shard.domain.usecase.DeleteScoreUseCase
+import com.kandc.acscore.shard.domain.usecase.RenameScoreTitleUseCase
 import com.kandc.acscore.root.MainHostScreen
 import com.kandc.acscore.root.RootComponent
 import com.kandc.acscore.root.RootComponentImpl
 import com.kandc.acscore.root.RootUiViewModel
-import com.kandc.acscore.library.ui.LibraryViewModel
-import com.kandc.acscore.library.ui.LibraryViewModelFactory
-import com.kandc.acscore.viewer.session.ViewerSessionViewModel
+import com.kandc.acscore.ui.library.LibraryViewModel
+import com.kandc.acscore.ui.library.LibraryViewModelFactory
+import com.kandc.acscore.session.viewer.ViewerSessionViewModel
 
 class MainActivity : ComponentActivity() {
 

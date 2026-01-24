@@ -5,9 +5,9 @@ import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.value.Value
-import com.kandc.acscore.library.ui.LibraryViewModel
+import com.kandc.acscore.ui.library.LibraryViewModel
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
-import com.kandc.acscore.viewer.session.ViewerSessionStore
+import com.kandc.acscore.session.viewer.ViewerSessionStore
 import kotlinx.coroutines.flow.StateFlow
 
 class RootComponentImpl(

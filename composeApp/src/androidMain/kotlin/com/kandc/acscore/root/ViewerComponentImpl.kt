@@ -2,7 +2,7 @@ package com.kandc.acscore.root
 
 import com.arkivanov.decompose.ComponentContext
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
-import com.kandc.acscore.viewer.session.ViewerSessionStore
+import com.kandc.acscore.session.viewer.ViewerSessionStore
 
 class ViewerComponentImpl(
     componentContext: ComponentContext,

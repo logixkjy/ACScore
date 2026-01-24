@@ -6,8 +6,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.kandc.acscore.data.local.ScoreDao
 import com.kandc.acscore.data.local.ScoreEntity
-import com.kandc.acscore.data.model.Score
-import com.kandc.acscore.data.repository.ScoreRepository
+import com.kandc.acscore.shard.domain.model.Score
+import com.kandc.acscore.shard.domain.repository.ScoreRepository
 import java.io.File
 import java.util.UUID
 import com.kandc.acscore.util.KoreanChosung
