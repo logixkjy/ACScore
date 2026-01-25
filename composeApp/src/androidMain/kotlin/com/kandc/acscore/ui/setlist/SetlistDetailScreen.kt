@@ -32,7 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -43,8 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import kotlin.math.abs
+import kotlin.math.abs 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -221,10 +219,6 @@ private fun ReorderableIdList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-
-    var draggingId by remember { mutableStateOf<String?>(null) }
-    var dragOffsetY by remember { mutableStateOf(0f) }
 
     fun move(from: Int, to: Int) {
         if (from == to) return
@@ -232,81 +226,43 @@ private fun ReorderableIdList(
         ids.add(to, item)
     }
 
-    // ✅ 자동 스크롤 파라미터 (너무 빠르면 조절)
-    val edgeThresholdPx = 72f     // 상/하단 이 근처면 스크롤
-    val scrollStepPx = 22f        // 한 번에 이동량
-    val scrollCooldownMs = 16L    // 60fps 느낌
-
     LazyColumn(
         state = listState,
         modifier = modifier,
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         itemsIndexed(ids, key = { _, id -> id }) { _, id ->
-            val isDragging = (draggingId == id)
-
             Surface(
-                tonalElevation = if (isDragging) 4.dp else 0.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .pointerInput(ids) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                draggingId = id
-                                dragOffsetY = 0f
-                            },
-                            onDragEnd = {
-                                draggingId = null
-                                dragOffsetY = 0f
-                                onReorderCommitted(ids.toList())
-                            },
-                            onDragCancel = {
-                                draggingId = null
-                                dragOffsetY = 0f
-                            },
-                            onDrag = { change, dragAmount ->
+                            onDragStart = { /* no-op */ },
+                            onDragEnd = { onReorderCommitted(ids.toList()) },
+                            onDragCancel = { /* no-op */ },
+                            onDrag = { change, _ ->
                                 change.consumePositionChange()
-                                dragOffsetY += dragAmount.y
 
                                 val layout = listState.layoutInfo
                                 val visible = layout.visibleItemsInfo
+
+                                // ✅ 현재 드래그 중인 아이템의 리스트 내 위치
                                 val current = visible.firstOrNull { it.key == id }
                                     ?: return@detectDragGesturesAfterLongPress
 
-                                // ✅ 현재 아이템 center + dragOffset => targetY
-                                val currentCenter = current.offset + current.size / 2
-                                val targetY = currentCenter + dragOffsetY
+                                // ✅ 핵심: "리스트 뷰포트 기준 손가락 Y"
+                                val pointerYInViewport = current.offset + change.position.y
 
-                                // ✅ 타겟 선정: "가장 가까운 center"
+                                // ✅ 가장 가까운 center를 타겟으로 선택
                                 val target = visible.minByOrNull { info ->
                                     val center = info.offset + info.size / 2
-                                    kotlin.math.abs(center - targetY)
+                                    abs(center - pointerYInViewport)
                                 } ?: return@detectDragGesturesAfterLongPress
 
                                 val from = ids.indexOf(id)
                                 val to = ids.indexOf(target.key as String)
                                 if (from != -1 && to != -1 && from != to) {
                                     move(from, to)
-                                }
-
-                                // ✅ 자동 스크롤: 포인터가 리스트 상/하단 근처면 스크롤
-                                val viewportStart = layout.viewportStartOffset.toFloat()
-                                val viewportEnd = layout.viewportEndOffset.toFloat()
-
-                                val pointerYInViewport = change.position.y
-                                val distToTop = pointerYInViewport - viewportStart
-                                val distToBottom = viewportEnd - pointerYInViewport
-
-                                if (distToTop < edgeThresholdPx) {
-                                    scope.launch {
-                                        listState.scrollBy(-scrollStepPx)
-                                        kotlinx.coroutines.delay(scrollCooldownMs)
-                                    }
-                                } else if (distToBottom < edgeThresholdPx) {
-                                    scope.launch {
-                                        listState.scrollBy(scrollStepPx)
-                                        kotlinx.coroutines.delay(scrollCooldownMs)
-                                    }
                                 }
                             }
                         )
