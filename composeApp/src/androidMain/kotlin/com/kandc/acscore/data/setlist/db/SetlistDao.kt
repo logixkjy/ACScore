@@ -12,6 +12,12 @@ interface SetlistDao {
     @Query("SELECT * FROM setlists ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<SetlistEntity>>
 
+    @Query("SELECT * FROM setlists WHERE id = :id LIMIT 1")
+    fun observeById(id: String): Flow<SetlistEntity?>
+
+    @Query("SELECT * FROM setlists WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): SetlistEntity?
+
     @Query("SELECT * FROM setlists ORDER BY createdAt DESC")
     suspend fun getAllOnce(): List<SetlistEntity>
 

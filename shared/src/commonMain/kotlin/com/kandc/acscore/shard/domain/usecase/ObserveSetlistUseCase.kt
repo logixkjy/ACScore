@@ -4,9 +4,8 @@ import com.kandc.acscore.shared.domain.model.Setlist
 import com.kandc.acscore.shared.domain.repository.SetlistRepository
 import kotlinx.coroutines.flow.Flow
 
-class ObserveSetlistsUseCase(
+class ObserveSetlistUseCase(
     private val repo: SetlistRepository
 ) {
-    operator fun invoke(): Flow<List<Setlist>> =
-        repo.observeAll()
+    operator fun invoke(id: String): Flow<Setlist?> = repo.observeById(id)
 }

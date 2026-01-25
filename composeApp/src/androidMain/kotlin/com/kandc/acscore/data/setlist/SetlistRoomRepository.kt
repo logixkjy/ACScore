@@ -16,10 +16,16 @@ class SetlistRoomRepository(
 ) : SetlistRepository {
 
     override fun observeAll(): Flow<List<Setlist>> =
-        dao.observeAll().map { list -> list.map { it.toDomain(json) } }
+        dao.observeAll().map { list -> list.map { it.toDomain() } }
+
+    override fun observeById(id: String): Flow<Setlist?> =
+        dao.observeById(id).map { it?.toDomain() }
 
     override suspend fun getAll(): List<Setlist> =
-        dao.getAllOnce().map { it.toDomain(json) }
+        dao.getAllOnce().map { it.toDomain() }
+
+    override suspend fun getById(id: String): Setlist? =
+        dao.getById(id)?.toDomain()
 
     override suspend fun create(name: String): Setlist {
         val now = System.currentTimeMillis()
@@ -30,18 +36,35 @@ class SetlistRoomRepository(
             updatedAt = now,
             itemIds = emptyList(),
         )
-        dao.upsert(model.toEntity(json))
+        dao.upsert(model.toEntity())
         return model
+    }
+
+    override suspend fun rename(id: String, newName: String) {
+        val current = dao.getById(id) ?: return
+        val now = System.currentTimeMillis()
+        dao.upsert(current.copy(name = newName, updatedAt = now))
+    }
+
+    override suspend fun updateItems(id: String, itemIds: List<String>) {
+        val current = dao.getById(id) ?: return
+        val now = System.currentTimeMillis()
+        dao.upsert(
+            current.copy(
+                updatedAt = now,
+                itemIdsJson = runCatching { json.encodeToString(itemIds) }.getOrElse { "[]" }
+            )
+        )
     }
 
     override suspend fun delete(id: String) {
         dao.deleteById(id)
     }
 
-    private fun SetlistEntity.toDomain(json: Json): Setlist {
+    private fun SetlistEntity.toDomain(): Setlist {
         val itemIds = runCatching {
             json.decodeFromString<List<String>>(itemIdsJson)
-        }.getOrElse { emptyList() } // 깨진 데이터여도 크래시 방지
+        }.getOrElse { emptyList() }
         return Setlist(
             id = id,
             name = name,
@@ -51,7 +74,7 @@ class SetlistRoomRepository(
         )
     }
 
-    private fun Setlist.toEntity(json: Json): SetlistEntity =
+    private fun Setlist.toEntity(): SetlistEntity =
         SetlistEntity(
             id = id,
             name = name,

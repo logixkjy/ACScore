@@ -140,23 +140,34 @@ private fun SetlistRow(
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = {
-            Text(
-                text = name,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        supportingContent = { Text("${count}곡") },
-        trailingContent = {
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete")
-            }
-        },
+    androidx.compose.material3.Surface(
+        tonalElevation = 0.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-    )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(text = "${count}곡")
+            }
+
+            IconButton(
+                onClick = onDelete
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete")
+            }
+        }
+    }
     HorizontalDivider()
 }
