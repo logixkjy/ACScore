@@ -44,6 +44,7 @@ fun LibraryScreen(
     onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit,
     onPickScore: ((scoreId: String, title: String, fileName: String) -> Unit)? = null,
     onCancelPick: (() -> Unit)? = null,
+    onDonePick: (() -> Unit)? = null,
     pickedScoreIds: Set<String> = emptySet(),
 ) {
     val scores by vm.scores.collectAsState()
@@ -113,6 +114,9 @@ fun LibraryScreen(
                 TopAppBar(
                     title = { Text("곡 선택") },
                     actions = {
+                        TextButton(onClick = { onDonePick?.invoke() }) {
+                            Text("완료")
+                        }
                         IconButton(onClick = { onCancelPick?.invoke() }) {
                             Icon(Icons.Default.Close, contentDescription = "Cancel pick")
                         }

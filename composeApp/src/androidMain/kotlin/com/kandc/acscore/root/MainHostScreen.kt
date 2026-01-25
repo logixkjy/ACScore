@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.kandc.acscore.di.SetlistDi
 import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
+import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
 
 private enum class HomeTab { Library, Setlists }
 
@@ -95,17 +96,8 @@ fun MainHostScreen(component: RootComponent) {
                                         runCatching {
                                             addToSetlist(targetSetlistId, scoreId)
                                         }.onSuccess {
-                                            // ✅ 연속 선택: 라이브러리에 남아있기
                                             pickingSelectedIds = pickingSelectedIds + scoreId
-
-                                            // ✅ 돌아갈 때를 대비해서 상세 id는 유지해두자
                                             openedSetlistId = targetSetlistId
-
-                                            // ❌ 아래 3개는 연속 선택에서는 하지 않는다
-                                            // selectedTab = HomeTab.Setlists
-                                            // pickingForSetlistId = null
-                                            // pickingSelectedIds = emptySet()
-
                                         }.onFailure { e ->
                                             component.libraryViewModel.emitError(e.message ?: "세트리스트 추가 실패")
                                         }
@@ -122,6 +114,16 @@ fun MainHostScreen(component: RootComponent) {
                                 }
                             } else null,
 
+                            onDonePick = if (pickingForSetlistId != null) {
+                                {
+                                    // ✅ 완료: Setlists 상세로 복귀
+                                    selectedTab = HomeTab.Setlists
+                                    openedSetlistId = pickingForSetlistId
+                                    pickingForSetlistId = null
+                                    pickingSelectedIds = emptySet()
+                                }
+                            } else null,
+
                             pickedScoreIds = pickingSelectedIds
                         )
                     }
@@ -130,6 +132,19 @@ fun MainHostScreen(component: RootComponent) {
                         // ✅ 라이브러리 후보 리스트(ScorePickItem) 만들기
                         // 아래 함수에서 "너의 실제 라이브러리 모델"에 맞게 매핑만 맞춰주면 됨.
                         val candidates = rememberLibraryCandidates(component)
+
+                        val context = LocalContext.current
+                        val scope = rememberCoroutineScope()
+
+                        val setlistRepo = remember(context.applicationContext) {
+                            SetlistDi.provideRepository(context.applicationContext)
+                        }
+
+                        val updateSetlistItems = remember(setlistRepo) {
+                            UpdateSetlistItemsUseCase(
+                                setlistRepo
+                            )
+                        }
 
                         val id = openedSetlistId
                         if (id == null) {
@@ -158,6 +173,16 @@ fun MainHostScreen(component: RootComponent) {
                                     pickingForSetlistId = id
                                     pickingSelectedIds = currentItemIds.toSet()
                                     selectedTab = HomeTab.Library
+                                },
+                                onReorderItems = { sid, newIds ->
+                                    scope.launch {
+                                        runCatching {
+                                            // ✅ 여기: 저장 유스케이스/레포 호출
+                                            updateSetlistItems(sid, newIds)
+                                        }.onFailure { e ->
+                                            component.libraryViewModel.emitError(e.message ?: "순서 저장 실패")
+                                        }
+                                    }
                                 }
                             )
                         }
