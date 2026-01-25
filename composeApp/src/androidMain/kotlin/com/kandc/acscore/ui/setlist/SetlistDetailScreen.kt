@@ -24,6 +24,7 @@ fun SetlistDetailScreen(
     modifier: Modifier = Modifier,
     onBack: () -> Unit = {},
     onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit = { _, _, _ -> },
+    onRequestPickFromLibrary: ((currentItemIds: List<String>) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val vm = remember(setlistId) { SetlistDetailViewModel(context, setlistId) }
@@ -49,7 +50,16 @@ fun SetlistDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showPicker = true }) {
+                    IconButton(
+                        onClick = {
+                            val ids = setlist?.itemIds.orEmpty()
+                            if (onRequestPickFromLibrary != null) {
+                                onRequestPickFromLibrary(ids)   // ✅ 현재 itemIds 전달
+                            } else {
+                                showPicker = true // 기존 다이얼로그 방식 유지(백업)
+                            }
+                        }
+                    ) {
                         Icon(Icons.Default.Add, contentDescription = "Add")
                     }
                 }

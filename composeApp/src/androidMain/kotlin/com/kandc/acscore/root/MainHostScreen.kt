@@ -17,6 +17,10 @@ import com.kandc.acscore.ui.setlist.SetlistListScreen
 import com.kandc.acscore.ui.viewer.TabbedViewerScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import java.io.File
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.kandc.acscore.di.SetlistDi
+import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
 
 private enum class HomeTab { Library, Setlists }
 
@@ -27,6 +31,9 @@ fun MainHostScreen(component: RootComponent) {
 
     // ✅ Setlists 내 네비(리스트 ↔ 상세)
     var openedSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pickingForSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pickingSelectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) } // ✅ 추가
+    val scope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize()) {
         // 아래: Viewer
@@ -61,21 +68,61 @@ fun MainHostScreen(component: RootComponent) {
 
                 when (selectedTab) {
                     HomeTab.Library -> {
-                        openedSetlistId = null
-
                         val context = LocalContext.current
+                        val scope = rememberCoroutineScope()
+
+                        // ✅ Setlist repo/usecase (반드시 remember로 고정)
+                        val setlistRepo = remember(context.applicationContext) {
+                            com.kandc.acscore.di.SetlistDi.provideRepository(context.applicationContext)
+                        }
+                        val addToSetlist = remember(setlistRepo) {
+                            com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase(setlistRepo)
+                        }
+
                         LibraryScreen(
                             vm = component.libraryViewModel,
+
                             onOpenViewer = { scoreId, title, fileName ->
                                 val filePath = File(context.filesDir, "scores/$fileName").absolutePath
                                 component.onScoreSelected(
-                                    ViewerOpenRequest(
-                                        scoreId = scoreId,
-                                        title = title,
-                                        filePath = filePath
-                                    )
+                                    ViewerOpenRequest(scoreId = scoreId, title = title, filePath = filePath)
                                 )
-                            }
+                            },
+
+                            onPickScore = pickingForSetlistId?.let { targetSetlistId ->
+                                { scoreId, title, fileName ->
+                                    scope.launch {
+                                        runCatching {
+                                            addToSetlist(targetSetlistId, scoreId)
+                                        }.onSuccess {
+                                            // ✅ 연속 선택: 라이브러리에 남아있기
+                                            pickingSelectedIds = pickingSelectedIds + scoreId
+
+                                            // ✅ 돌아갈 때를 대비해서 상세 id는 유지해두자
+                                            openedSetlistId = targetSetlistId
+
+                                            // ❌ 아래 3개는 연속 선택에서는 하지 않는다
+                                            // selectedTab = HomeTab.Setlists
+                                            // pickingForSetlistId = null
+                                            // pickingSelectedIds = emptySet()
+
+                                        }.onFailure { e ->
+                                            component.libraryViewModel.emitError(e.message ?: "세트리스트 추가 실패")
+                                        }
+                                    }
+                                }
+                            },
+
+                            onCancelPick = if (pickingForSetlistId != null) {
+                                {
+                                    selectedTab = HomeTab.Setlists
+                                    openedSetlistId = pickingForSetlistId
+                                    pickingForSetlistId = null
+                                    pickingSelectedIds = emptySet()
+                                }
+                            } else null,
+
+                            pickedScoreIds = pickingSelectedIds
                         )
                     }
 
@@ -106,6 +153,11 @@ fun MainHostScreen(component: RootComponent) {
                                             filePath = filePath
                                         )
                                     )
+                                },
+                                onRequestPickFromLibrary = { currentItemIds ->
+                                    pickingForSetlistId = id
+                                    pickingSelectedIds = currentItemIds.toSet()
+                                    selectedTab = HomeTab.Library
                                 }
                             )
                         }

@@ -29,12 +29,22 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.floor
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     vm: LibraryViewModel,
-    onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit
+    onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit,
+    onPickScore: ((scoreId: String, title: String, fileName: String) -> Unit)? = null,
+    onCancelPick: (() -> Unit)? = null,
+    pickedScoreIds: Set<String> = emptySet(),
 ) {
     val scores by vm.scores.collectAsState()
     val error by vm.error.collectAsState()
@@ -89,17 +99,36 @@ fun LibraryScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
 
+    val isPickMode = onPickScore != null
+    if (isPickMode) {
+        // ✅ Pick 모드에서는 뒤로가기 눌러도 "취소"로 처리
+        BackHandler(enabled = true) {
+            onCancelPick?.invoke()
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("ACScore Library") },
-                actions = {
-                    TextButton(
-                        enabled = !isImporting,
-                        onClick = { picker.launch(arrayOf("application/pdf")) }
-                    ) { Text("Import") }
-                }
-            )
+            if (isPickMode) {
+                TopAppBar(
+                    title = { Text("곡 선택") },
+                    actions = {
+                        IconButton(onClick = { onCancelPick?.invoke() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel pick")
+                        }
+                    }
+                )
+            } else {
+                TopAppBar(
+                    title = { Text("ACScore Library") },
+                    actions = {
+                        TextButton(
+                            enabled = !isImporting,
+                            onClick = { picker.launch(arrayOf("application/pdf")) }
+                        ) { Text("Import") }
+                    }
+                )
+            }
         }
     ) { padding ->
 
@@ -123,6 +152,14 @@ fun LibraryScreen(
                     }
                 }
             )
+            if (isPickMode) {
+                Text(
+                    text = "세트리스트에 추가할 곡을 선택하세요",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
 
             if (scores.isEmpty()) {
                 Box(
@@ -198,6 +235,9 @@ fun LibraryScreen(
                             items(itemsInSection, key = { it.id }) { score ->
                                 var expanded by remember(score.id) { mutableStateOf(false) }
 
+                                // ✅ row 스코프 안에서 계산
+                                val alreadyAdded = isPickMode && pickedScoreIds.contains(score.id)
+
                                 ListItem(
                                     headlineContent = {
                                         Text(
@@ -206,63 +246,81 @@ fun LibraryScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     },
-                                    // ✅ fileName 숨김
                                     trailingContent = {
-                                        Box {
-                                            IconButton(
-                                                enabled = !isImporting,
-                                                onClick = { expanded = true }
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.MoreVert,
-                                                    contentDescription = "메뉴"
+                                        if (isPickMode) {
+                                            if (alreadyAdded) {
+                                                Text(
+                                                    text = "추가됨",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
+                                            } else {
+                                                Spacer(Modifier.width(8.dp))
                                             }
+                                        } else {
+                                            Box {
+                                                IconButton(
+                                                    enabled = !isImporting,
+                                                    onClick = { expanded = true }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.MoreVert,
+                                                        contentDescription = "메뉴"
+                                                    )
+                                                }
 
-                                            DropdownMenu(
-                                                expanded = expanded,
-                                                onDismissRequest = { expanded = false }
-                                            ) {
-                                                DropdownMenuItem(
-                                                    text = { Text("이름 변경") },
-                                                    onClick = {
-                                                        expanded = false
-                                                        menuTarget = score
-                                                        renameText = score.title
-                                                        showRename = true
-                                                    }
-                                                )
-                                                DropdownMenuItem(
-                                                    text = { Text("메타데이터 보기") },
-                                                    onClick = {
-                                                        expanded = false
-                                                        menuTarget = score
-                                                        showMetadata = true
-                                                    }
-                                                )
-                                                Divider()
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            text = "삭제",
-                                                            color = MaterialTheme.colorScheme.error
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        expanded = false
-                                                        menuTarget = score
-                                                        showDeleteConfirm = true
-                                                    }
-                                                )
+                                                DropdownMenu(
+                                                    expanded = expanded,
+                                                    onDismissRequest = { expanded = false }
+                                                ) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("이름 변경") },
+                                                        onClick = {
+                                                            expanded = false
+                                                            menuTarget = score
+                                                            renameText = score.title
+                                                            showRename = true
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("메타데이터 보기") },
+                                                        onClick = {
+                                                            expanded = false
+                                                            menuTarget = score
+                                                            showMetadata = true
+                                                        }
+                                                    )
+                                                    Divider()
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Text(
+                                                                text = "삭제",
+                                                                color = MaterialTheme.colorScheme.error
+                                                            )
+                                                        },
+                                                        onClick = {
+                                                            expanded = false
+                                                            menuTarget = score
+                                                            showDeleteConfirm = true
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable(enabled = !isImporting) {
-                                            onOpenViewer(score.id, score.title, score.fileName)
+                                        .clickable(
+                                            enabled = !isImporting && !(isPickMode && alreadyAdded)
+                                        ) {
+                                            if (onPickScore != null) {
+                                                onPickScore(score.id, score.title, score.fileName)
+                                            } else {
+                                                onOpenViewer(score.id, score.title, score.fileName)
+                                            }
                                         }
                                 )
+
                                 Divider()
                             }
                         }
