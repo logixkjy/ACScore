@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,8 @@ import com.kandc.acscore.data.viewer.PdfPageLoader
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -32,9 +35,11 @@ fun SetlistPdfViewerScreen(
     initialScoreId: String?,
     modifier: Modifier = Modifier,
     initialGlobalPage: Int = 0,
+    onGlobalPageChanged: (Int) -> Unit = {},
+
+    // ✅ 이미 열린 탭 점프 지원
     jumpToScoreId: String? = null,
-    jumpToken: Long = 0L,
-    onGlobalPageChanged: (Int) -> Unit = {}
+    jumpToken: Long = 0L
 ) {
     val layout = rememberViewerLayout()
 
@@ -97,10 +102,9 @@ fun SetlistPdfViewerScreen(
         return (g - prefix[fileIndex]).coerceAtLeast(0)
     }
 
-    fun globalPageForScoreId(scoreId: String?): Int? {
-        if (scoreId.isNullOrBlank()) return null
-        val idx = requests.indexOfFirst { it.scoreId == scoreId }
-        if (idx < 0) return null
+    fun globalPageForScoreFirstPage(scoreId: String?): Int {
+        if (scoreId == null) return 0
+        val idx = requests.indexOfFirst { it.scoreId == scoreId }.takeIf { it >= 0 } ?: 0
         return prefix[idx].coerceIn(0, totalPages - 1)
     }
 
@@ -110,10 +114,12 @@ fun SetlistPdfViewerScreen(
         } ?: 0
     }
 
-    val initialGlobal = remember(initialIndex, prefix, initialGlobalPage, totalPages) {
-        // ✅ lastPage 저장값이 -1이면 “선택 곡 첫 페이지”로 시작
-        if (initialGlobalPage in 0 until totalPages) initialGlobalPage
-        else prefix[initialIndex].coerceIn(0, totalPages - 1)
+    val initialGlobal = remember(initialIndex, counts, prefix, initialGlobalPage) {
+        if (initialGlobalPage >= 0) {
+            initialGlobalPage.coerceIn(0, totalPages - 1)
+        } else {
+            prefix[initialIndex].coerceIn(0, totalPages - 1)
+        }
     }
 
     val pagerState = rememberPagerState(
@@ -121,17 +127,24 @@ fun SetlistPdfViewerScreen(
         pageCount = { totalPages }
     )
 
-    // ✅ 외부에서 "점프" 요청이 오면 (이미 열린 탭이어도) 해당 곡 첫 페이지로 이동
-    LaunchedEffect(jumpToken) {
-        if (jumpToken <= 0L) return@LaunchedEffect
-        val target = globalPageForScoreId(jumpToScoreId) ?: return@LaunchedEffect
-        if (pagerState.currentPage != target) {
-            pagerState.scrollToPage(target)
-        }
-    }
+    // ✅ fling 동작을 단일 뷰어와 동일하게(명시)
+    val fling = PagerDefaults.flingBehavior(
+        state = pagerState,
+        snapPositionalThreshold = 0.20f // 기본 0.5 → 훨씬 민감
+    )
 
+    // page save
     LaunchedEffect(pagerState.currentPage) {
         onGlobalPageChanged(pagerState.currentPage.coerceIn(0, totalPages - 1))
+    }
+
+    // ✅ 이미 열린 세트리스트 탭에서 "다른 곡 선택" 시 점프
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(jumpToken) {
+        val target = globalPageForScoreFirstPage(jumpToScoreId)
+        if (target != pagerState.currentPage) {
+            scope.launch { pagerState.animateScrollToPage(target) }
+        }
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -152,7 +165,9 @@ fun SetlistPdfViewerScreen(
             modifier = Modifier.fillMaxSize(),
             pageSize = PageSize.Fill,
             contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
-            pageSpacing = pageSpacing
+            pageSpacing = pageSpacing,
+            flingBehavior = fling,
+            beyondViewportPageCount = 1 // ✅ 다음/이전 한 장 미리 준비 → 스와이프 안정감
         ) { globalPage ->
             val fileIdx = findFileIndexByGlobalPage(globalPage)
             val local = localPageOf(globalPage, fileIdx)
@@ -266,7 +281,6 @@ private fun SetlistPageImage(
                     .wrapContentHeight(Alignment.CenterVertically)
             )
         }
-
         error != null -> {
             Column(
                 modifier = Modifier
@@ -280,7 +294,6 @@ private fun SetlistPageImage(
                 TextButton(onClick = { retryTick++ }) { Text("다시 시도") }
             }
         }
-
         else -> {
             Box(
                 modifier = Modifier

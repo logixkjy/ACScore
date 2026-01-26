@@ -27,10 +27,8 @@ class ViewerSessionViewModel(app: Application) : AndroidViewModel(app) {
     private var saveJob: Job? = null
 
     init {
-        // 1) 복원
         restore()
 
-        // 2) 변경 감지 → 디바운스로 저장
         viewModelScope.launch {
             store.state.collect {
                 scheduleSave()
@@ -47,7 +45,6 @@ class ViewerSessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun scheduleSave() {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
-            // 너무 자주 쓰지 않도록 디바운스
             delay(250)
             val snapshot = store.toSnapshot()
             val json = ViewerSessionSnapshotJson.toJson(snapshot)

@@ -67,8 +67,7 @@ fun TabbedViewerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                // ✅ 여기: tabTitle 사용
-                                text = tab.tabTitle,
+                                text = tab.tabTitle, // ✅ 여기!
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier
                                     .padding(end = 8.dp)
@@ -108,6 +107,7 @@ fun TabbedViewerScreen(
             val setlistReqs = active.setlistRequests
 
             if (setlistReqs != null) {
+                val latestTabId by rememberUpdatedState(active.tabId)
                 SetlistPdfViewerScreen(
                     requests = setlistReqs,
                     initialScoreId = active.request.scoreId,
@@ -116,7 +116,7 @@ fun TabbedViewerScreen(
                     jumpToScoreId = active.jumpToScoreId,
                     jumpToken = active.jumpToken,
                     onGlobalPageChanged = { page ->
-                        sessionStore.updateLastPage(active.tabId, page)
+                        sessionStore.updateLastPage(latestTabId, page)
                     }
                 )
             } else {
