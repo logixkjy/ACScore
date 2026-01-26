@@ -9,6 +9,15 @@ data class ViewerSessionSnapshot(
         val scoreId: String,
         val title: String,
         val filePath: String,
-        val lastPage: Int = 0
+        val lastPage: Int,
+
+        // ✅ setlist 이어보기 탭이면 리스트가 존재
+        val setlist: List<RequestSnapshot>? = null
+    )
+
+    data class RequestSnapshot(
+        val scoreId: String,
+        val title: String,
+        val filePath: String
     )
 }

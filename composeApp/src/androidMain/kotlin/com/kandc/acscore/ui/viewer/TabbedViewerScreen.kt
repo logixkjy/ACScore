@@ -34,34 +34,24 @@ fun TabbedViewerScreen(
     Column(modifier.fillMaxSize()) {
 
         if (controlsVisible) {
-            // ✅ 상단 컨트롤 바 (status bar 고려 + 버튼이 위로 쏠리지 않게 "아래로" 내려줌)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()               // ✅ 상태바 영역 확보
-                    .padding(horizontal = 10.dp)       // 좌우 패딩
-                    .padding(top = 10.dp, bottom = 10.dp), // ✅ 아래로 내려온 느낌(특히 top)
+                    .statusBarsPadding()
+                    .padding(horizontal = 10.dp)
+                    .padding(top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onRequestOpenLibrary,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp) // ✅ 버튼 자체도 살짝 "두툼"
-                ) { Text("Library") }
-
+                TextButton(onClick = onRequestOpenLibrary) { Text("Library") }
                 Spacer(Modifier.weight(1f))
-
-                TextButton(
-                    onClick = { controlsVisible = false },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-                ) { Text("Hide") }
+                TextButton(onClick = { controlsVisible = false }) { Text("Hide") }
             }
 
-            // 탭 바
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 8.dp), // ✅ 살짝 여유
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -107,7 +97,6 @@ fun TabbedViewerScreen(
             return
         }
 
-        // ✅ PDF 영역 탭으로 컨트롤 토글 (스크롤/스와이프는 pager가 처리)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -115,14 +104,30 @@ fun TabbedViewerScreen(
                     detectTapGestures(onTap = { controlsVisible = !controlsVisible })
                 }
         ) {
-            PdfViewerScreen(
-                request = active.request,
-                modifier = Modifier.fillMaxSize(),
-                initialPage = active.lastPage,
-                onPageChanged = { page ->
-                    sessionStore.updateLastPage(active.tabId, page)
-                }
-            )
+            val setlistReqs = active.setlistRequests
+
+            if (setlistReqs != null) {
+                // ✅ Setlist 연결 Viewer (스와이프로 곡 넘어감)
+                SetlistPdfViewerScreen(
+                    requests = setlistReqs,
+                    initialScoreId = active.request.scoreId,
+                    modifier = Modifier.fillMaxSize(),
+                    initialGlobalPage = active.lastPage,
+                    onGlobalPageChanged = { page ->
+                        sessionStore.updateLastPage(active.tabId, page)
+                    }
+                )
+            } else {
+                // ✅ 일반 단일 PDF
+                PdfViewerScreen(
+                    request = active.request,
+                    modifier = Modifier.fillMaxSize(),
+                    initialPage = active.lastPage,
+                    onPageChanged = { page ->
+                        sessionStore.updateLastPage(active.tabId, page)
+                    }
+                )
+            }
         }
     }
 }

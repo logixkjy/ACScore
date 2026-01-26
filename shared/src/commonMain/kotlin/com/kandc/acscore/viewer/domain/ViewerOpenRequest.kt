@@ -7,5 +7,6 @@ package com.kandc.acscore.viewer.domain
 data class ViewerOpenRequest(
     val scoreId: String,
     val title: String,
-    val filePath: String
+    val filePath: String,
+    val playContext: ViewerPlayContext? = null, // ✅ 추가
 )

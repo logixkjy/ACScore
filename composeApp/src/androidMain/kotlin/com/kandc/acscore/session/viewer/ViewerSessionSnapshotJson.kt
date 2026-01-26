@@ -7,57 +7,45 @@ object ViewerSessionSnapshotJson {
 
     fun toJson(snapshot: ViewerSessionSnapshot): String {
         val root = JSONObject()
-        root.put("activeTabId", snapshot.activeTabId ?: JSONObject.NULL)
+        root.put("activeTabId", snapshot.activeTabId)
 
-        val arr = JSONArray()
+        val tabsArr = JSONArray()
         snapshot.tabs.forEach { tab ->
-            val o = JSONObject()
-            o.put("tabId", tab.tabId)
-            o.put("scoreId", tab.scoreId)
-            o.put("title", tab.title)
-            o.put("filePath", tab.filePath)
-            o.put("lastPage", tab.lastPage) // ✅ 추가
-            arr.put(o)
+            val obj = JSONObject()
+            obj.put("tabId", tab.tabId)
+            obj.put("scoreId", tab.scoreId)
+            obj.put("title", tab.title)
+            obj.put("filePath", tab.filePath)
+            obj.put("lastPage", tab.lastPage)
+            tabsArr.put(obj)
         }
-        root.put("tabs", arr)
+        root.put("tabs", tabsArr)
+
         return root.toString()
     }
 
     fun fromJson(raw: String): ViewerSessionSnapshot? {
-        return try {
+        return runCatching {
             val root = JSONObject(raw)
-
-            val activeTabId =
-                if (root.isNull("activeTabId")) null else root.optString("activeTabId", null)
+            val activeTabId = root.optString("activeTabId", null)
 
             val tabsArr = root.optJSONArray("tabs") ?: JSONArray()
             val tabs = buildList {
                 for (i in 0 until tabsArr.length()) {
-                    val o = tabsArr.optJSONObject(i) ?: continue
-
-                    val tabId = o.optString("tabId", "")
-                    val scoreId = o.optString("scoreId", "")
-                    val title = o.optString("title", "")
-                    val filePath = o.optString("filePath", "")
-                    val lastPage = o.optInt("lastPage", 0) // ✅ 추가
-
-                    if (tabId.isBlank() || filePath.isBlank()) continue
-
+                    val obj = tabsArr.optJSONObject(i) ?: continue
                     add(
                         ViewerSessionSnapshot.TabSnapshot(
-                            tabId = tabId,
-                            scoreId = scoreId,
-                            title = title,
-                            filePath = filePath,
-                            lastPage = lastPage
+                            tabId = obj.optString("tabId"),
+                            scoreId = obj.optString("scoreId"),
+                            title = obj.optString("title"),
+                            filePath = obj.optString("filePath"),
+                            lastPage = obj.optInt("lastPage", 0)
                         )
                     )
                 }
             }
 
             ViewerSessionSnapshot(tabs = tabs, activeTabId = activeTabId)
-        } catch (_: Throwable) {
-            null
-        }
+        }.getOrNull()
     }
 }

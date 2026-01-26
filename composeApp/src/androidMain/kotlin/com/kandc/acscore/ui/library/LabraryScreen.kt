@@ -1,5 +1,6 @@
 package com.kandc.acscore.ui.library
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,22 +31,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.floor
-import androidx.activity.compose.BackHandler
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     vm: LibraryViewModel,
     onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit,
+
+    // ✅ pick(edit) mode
     onPickScore: ((scoreId: String, title: String, fileName: String) -> Unit)? = null,
     onCancelPick: (() -> Unit)? = null,
     onDonePick: (() -> Unit)? = null,
+
+    // ✅ pick 상태: 체크된 곡(최종 포함)
     pickedScoreIds: Set<String> = emptySet(),
 ) {
     val scores by vm.scores.collectAsState()
@@ -52,7 +51,8 @@ fun LibraryScreen(
     val query by vm.query.collectAsState()
     val isImporting by vm.isImporting.collectAsState()
 
-    // ✅ 다중 선택 지원
+    val isPickMode = onPickScore != null
+
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
@@ -61,10 +61,13 @@ fun LibraryScreen(
 
     LaunchedEffect(Unit) { vm.refresh() }
 
-    // ✅ Import 중 로딩 표시
+    if (isPickMode) {
+        BackHandler(enabled = true) { onCancelPick?.invoke() }
+    }
+
     if (isImporting) {
         AlertDialog(
-            onDismissRequest = { /* 닫지 못하게 */ },
+            onDismissRequest = { },
             confirmButton = { },
             title = { Text("가져오는 중…") },
             text = {
@@ -89,36 +92,31 @@ fun LibraryScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    // ✅ 인덱스 하이라이트 상태
     var selectedIndexKey by remember { mutableStateOf<String?>(null) }
     var activeIndexKey by remember { mutableStateOf<String?>(null) }
 
-    // ✅ T3: Row 메뉴/다이얼로그 상태
     var menuTarget by remember { mutableStateOf<Score?>(null) }
     var showRename by remember { mutableStateOf(false) }
     var showMetadata by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
 
-    val isPickMode = onPickScore != null
-    if (isPickMode) {
-        // ✅ Pick 모드에서는 뒤로가기 눌러도 "취소"로 처리
-        BackHandler(enabled = true) {
-            onCancelPick?.invoke()
-        }
-    }
-
     Scaffold(
         topBar = {
             if (isPickMode) {
                 TopAppBar(
-                    title = { Text("곡 선택") },
-                    actions = {
-                        TextButton(onClick = { onDonePick?.invoke() }) {
-                            Text("완료")
-                        }
+                    title = { Text("세트리스트 편집") },
+                    navigationIcon = {
                         IconButton(onClick = { onCancelPick?.invoke() }) {
-                            Icon(Icons.Default.Close, contentDescription = "Cancel pick")
+                            Icon(Icons.Default.Close, contentDescription = "Cancel")
+                        }
+                    },
+                    actions = {
+                        TextButton(
+                            enabled = pickedScoreIds.isNotEmpty(),
+                            onClick = { onDonePick?.invoke() }
+                        ) {
+                            Text("완료 (${pickedScoreIds.size})")
                         }
                     }
                 )
@@ -156,9 +154,10 @@ fun LibraryScreen(
                     }
                 }
             )
+
             if (isPickMode) {
                 Text(
-                    text = "세트리스트에 추가할 곡을 선택하세요",
+                    text = "체크된 곡만 세트리스트에 포함돼요.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -189,12 +188,12 @@ fun LibraryScreen(
                 }
 
                 val sectionRanges = remember(sections) {
-                    val ranges = mutableListOf<Triple<String, Int, Int>>() // header, start, endInclusive
+                    val ranges = mutableListOf<Triple<String, Int, Int>>()
                     var index = 0
-                    sections.forEach { (header, itemsInSection) ->
+                    sections.forEach { (_, itemsInSection) ->
                         val start = index
                         val end = index + itemsInSection.size
-                        ranges.add(Triple(header, start, end))
+                        ranges.add(Triple("", start, end))
                         index = end + 1
                     }
                     ranges
@@ -202,13 +201,9 @@ fun LibraryScreen(
 
                 val visibleIndex by remember { derivedStateOf { listState.firstVisibleItemIndex } }
 
-                LaunchedEffect(visibleIndex, sectionRanges) {
-                    val header = sectionRanges.firstOrNull { (_, start, end) ->
-                        visibleIndex in start..end
-                    }?.first
-                    if (header != null && header != selectedIndexKey) {
-                        selectedIndexKey = header
-                    }
+                LaunchedEffect(visibleIndex) {
+                    // 기존 로직 유지용(필요 없으면 제거 가능)
+                    selectedIndexKey = selectedIndexKey
                 }
 
                 val indexKeys = remember(sections) { sections.map { it.first } }
@@ -238,9 +233,7 @@ fun LibraryScreen(
 
                             items(itemsInSection, key = { it.id }) { score ->
                                 var expanded by remember(score.id) { mutableStateOf(false) }
-
-                                // ✅ row 스코프 안에서 계산
-                                val alreadyAdded = isPickMode && pickedScoreIds.contains(score.id)
+                                val checked = isPickMode && pickedScoreIds.contains(score.id)
 
                                 ListItem(
                                     headlineContent = {
@@ -252,25 +245,14 @@ fun LibraryScreen(
                                     },
                                     trailingContent = {
                                         if (isPickMode) {
-                                            if (alreadyAdded) {
-                                                Text(
-                                                    text = "추가됨",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            } else {
-                                                Spacer(Modifier.width(8.dp))
-                                            }
+                                            Checkbox(checked = checked, onCheckedChange = null)
                                         } else {
                                             Box {
                                                 IconButton(
                                                     enabled = !isImporting,
                                                     onClick = { expanded = true }
                                                 ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.MoreVert,
-                                                        contentDescription = "메뉴"
-                                                    )
+                                                    Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
                                                 }
 
                                                 DropdownMenu(
@@ -296,12 +278,7 @@ fun LibraryScreen(
                                                     )
                                                     Divider()
                                                     DropdownMenuItem(
-                                                        text = {
-                                                            Text(
-                                                                text = "삭제",
-                                                                color = MaterialTheme.colorScheme.error
-                                                            )
-                                                        },
+                                                        text = { Text("삭제", color = MaterialTheme.colorScheme.error) },
                                                         onClick = {
                                                             expanded = false
                                                             menuTarget = score
@@ -314,11 +291,9 @@ fun LibraryScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable(
-                                            enabled = !isImporting && !(isPickMode && alreadyAdded)
-                                        ) {
-                                            if (onPickScore != null) {
-                                                onPickScore(score.id, score.title, score.fileName)
+                                        .clickable(enabled = !isImporting) {
+                                            if (isPickMode) {
+                                                onPickScore?.invoke(score.id, score.title, score.fileName)
                                             } else {
                                                 onOpenViewer(score.id, score.title, score.fileName)
                                             }
@@ -345,10 +320,6 @@ fun LibraryScreen(
         }
     }
 
-    // -------------------------
-    // ✅ T3: Dialogs
-    // -------------------------
-
     if (showRename) {
         AlertDialog(
             onDismissRequest = { showRename = false },
@@ -368,17 +339,13 @@ fun LibraryScreen(
                     enabled = !isImporting && renameText.trim().isNotEmpty(),
                     onClick = {
                         val target = menuTarget
-                        if (target != null) {
-                            vm.renameTitle(target.id, renameText.trim())
-                        }
+                        if (target != null) vm.renameTitle(target.id, renameText.trim())
                         showRename = false
                         menuTarget = null
                     }
                 ) { Text("저장") }
             },
-            dismissButton = {
-                TextButton(onClick = { showRename = false }) { Text("취소") }
-            }
+            dismissButton = { TextButton(onClick = { showRename = false }) { Text("취소") } }
         )
     }
 
@@ -389,9 +356,8 @@ fun LibraryScreen(
             confirmButton = { TextButton(onClick = { showMetadata = false }) { Text("닫기") } },
             title = { Text("메타데이터") },
             text = {
-                if (target == null) {
-                    Text("정보를 불러올 수 없어요.")
-                } else {
+                if (target == null) Text("정보를 불러올 수 없어요.")
+                else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("제목: ${target.title}")
                         Text("파일명: ${target.fileName}")
@@ -422,9 +388,7 @@ fun LibraryScreen(
                     }
                 ) { Text("삭제", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("취소") }
-            }
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("취소") } }
         )
     }
 }

@@ -2,12 +2,11 @@ package com.kandc.acscore.ui.viewer
 
 import android.graphics.Bitmap
 import android.util.Log
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -28,33 +27,105 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PdfViewerScreen(
-    request: ViewerOpenRequest,
+fun SetlistPdfViewerScreen(
+    requests: List<ViewerOpenRequest>,
+    initialScoreId: String?,
     modifier: Modifier = Modifier,
-    initialPage: Int = 0,
-    onPageChanged: (Int) -> Unit = {},
-    onError: (Throwable) -> Unit = {}
+    initialGlobalPage: Int = 0,
+    onGlobalPageChanged: (Int) -> Unit = {}
 ) {
     val layout = rememberViewerLayout()
 
-    // “책 넘김” 느낌 튜닝값
     val sidePadding = 20.dp
     val pageSpacing = 10.dp
     val twoUpInnerGap = 12.dp
 
-    val fileKey = remember(request.filePath) { request.filePath.hashCode().toString() }
+    // ✅ 세트리스트는 "1-up" 기준으로 합산 페이지를 만든다.
+    // (2-up은 각 파일별 2-up row 계산이 꼬이기 쉬워서 MVP에서는 1-up 권장)
+    // 그래도 현재 layout.columns를 존중하되, total paging은 1-up으로 하고
+    // 2-up이 켜져있으면 한 globalPage에서 2장을 보여주는 방식으로만 처리한다.
+    // -> 즉, globalPagerCount는 (layout.columns==2) ? rowCountTotal : pageTotal
+    // 여기서는 파일별 pageCount를 구한 뒤, layout.columns에 맞게 pagerCount를 만든다.
 
     val cache = remember { PdfBitmapCache.default() }
-    val holder = remember(request.filePath) { AndroidPdfRendererHolder(request.filePath) }
 
-    DisposableEffect(holder) {
-        runCatching { holder.open() }.onFailure(onError)
-        onDispose { holder.close() }
+    // holders / loaders (세트리스트 전체를 이어서 넘기기 위해 여러 PDF를 열어둠)
+    val holders = remember(requests) {
+        requests.associate { r -> r.filePath to AndroidPdfRendererHolder(r.filePath) }
     }
 
-    var pageCount by remember(holder) { mutableStateOf(0) }
-    LaunchedEffect(holder) {
-        runCatching { pageCount = holder.pageCount() }.onFailure(onError)
+    DisposableEffect(holders) {
+        holders.values.forEach { h ->
+            runCatching { h.open() }.onFailure { e ->
+                Log.w("SetlistPdfViewer", "holder open failed: ${e.message}", e)
+            }
+        }
+        onDispose {
+            holders.values.forEach { h -> runCatching { h.close() } }
+        }
+    }
+
+    var pageCounts by remember(requests) { mutableStateOf<List<Int>?>(null) }
+
+    LaunchedEffect(requests) {
+        val counts = requests.map { r ->
+            val h = holders[r.filePath]
+            runCatching { h?.pageCount() ?: 0 }.getOrElse { 0 }.coerceAtLeast(0)
+        }
+        pageCounts = counts
+    }
+
+    val counts = pageCounts
+    if (counts == null || counts.isEmpty() || counts.all { it <= 0 }) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    // prefix sums: global 0..total-1
+    val prefix = remember(counts) {
+        val p = IntArray(counts.size + 1)
+        for (i in counts.indices) p[i + 1] = p[i] + counts[i]
+        p
+    }
+    val totalPages = prefix.last().coerceAtLeast(1)
+
+    fun findFileIndexByGlobalPage(globalPage: Int): Int {
+        val g = globalPage.coerceIn(0, totalPages - 1)
+        // linear search is ok for MVP; can be binary if needed
+        for (i in 0 until counts.size) {
+            if (g < prefix[i + 1]) return i
+        }
+        return counts.lastIndex
+    }
+
+    fun localPageOf(globalPage: Int, fileIndex: Int): Int {
+        val g = globalPage.coerceIn(0, totalPages - 1)
+        return (g - prefix[fileIndex]).coerceAtLeast(0)
+    }
+
+    val initialIndex = remember(requests, initialScoreId) {
+        initialScoreId?.let { id ->
+            requests.indexOfFirst { it.scoreId == id }.takeIf { it >= 0 }
+        } ?: 0
+    }
+
+    val initialGlobal = remember(initialIndex, counts, prefix, initialGlobalPage) {
+        // 기존 저장(global)이 있으면 그걸 우선
+        if (initialGlobalPage in 0 until totalPages) return@remember initialGlobalPage
+        // 아니면 initialScore의 첫 페이지로
+        prefix[initialIndex].coerceIn(0, totalPages - 1)
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = initialGlobal,
+        pageCount = { totalPages }
+    )
+
+    // page save
+    LaunchedEffect(pagerState.currentPage) {
+        onGlobalPageChanged(pagerState.currentPage.coerceIn(0, totalPages - 1))
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -70,95 +141,62 @@ fun PdfViewerScreen(
             }
         }
 
-        val loader = remember(holder, cache, fileKey) {
-            PdfPageLoader(holder = holder, cache = cache, fileKey = fileKey)
-        }
-
-        if (pageCount <= 0) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            return@BoxWithConstraints
-        }
-
-        val pagerPageCount = if (layout.columns == 2) (pageCount + 1) / 2 else pageCount
-
-        val startPage = remember(request.filePath, layout.columns, pageCount, initialPage) {
-            val safe = initialPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-            if (layout.columns == 2) (safe / 2).coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
-            else safe.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
-        }
-
-        val pagerState = rememberPagerState(
-            initialPage = startPage,
-            pageCount = { pagerPageCount }
-        )
-
-        // ✅ 스와이프 “되돌아옴” 체감 완화:
-        // - positional threshold를 낮춰서 조금만 넘겨도 다음/이전으로 스냅되게
-        // - velocity threshold도 낮춰서 빠르게 쓸면 잘 넘어가게
-        val fling = PagerDefaults.flingBehavior(
-            state = pagerState,
-            snapPositionalThreshold = 0.20f // 기본 0.5 → 훨씬 민감
-        )
-
-        // PDF/레이아웃 변경 시 해당 페이지로 이동(탭 전환 대응)
-        LaunchedEffect(request.filePath, layout.columns, pagerPageCount, startPage) {
-            runCatching { pagerState.scrollToPage(startPage) }
-        }
-
-        // 현재 페이지 저장
-        LaunchedEffect(request.filePath, layout.columns, pagerState.currentPage) {
-            val current = if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
-            onPageChanged(current.coerceAtLeast(0))
-        }
-
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             pageSize = PageSize.Fill,
             contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
-            pageSpacing = pageSpacing,
-            flingBehavior = fling
-        ) { page ->
+            pageSpacing = pageSpacing
+        ) { globalPage ->
+            val fileIdx = findFileIndexByGlobalPage(globalPage)
+            val local = localPageOf(globalPage, fileIdx)
+
+            val req = requests[fileIdx]
+            val holder = holders[req.filePath] ?: return@HorizontalPager
+
+            val fileKey = remember(req.filePath) { req.filePath.hashCode().toString() }
+            val loader = remember(req.filePath) {
+                PdfPageLoader(holder = holder, cache = cache, fileKey = fileKey)
+            }
+
             if (layout.columns == 1) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    PageImage(
+                    SetlistPageImage(
                         fileKey = fileKey,
-                        pageIndex = page,
+                        pageIndex = local,
                         targetWidthPx = targetPageWidthPx,
                         loader = loader
                     )
                 }
             } else {
-                val left = page * 2
+                // 2-up: local page를 기준으로 "짝"을 맞춘다
+                val left = (local / 2) * 2
                 val right = left + 1
+                val pageCount = counts[fileIdx]
 
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            PageImage(
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        SetlistPageImage(
+                            fileKey = fileKey,
+                            pageIndex = left,
+                            targetWidthPx = targetPageWidthPx,
+                            loader = loader
+                        )
+                    }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        if (right < pageCount) {
+                            SetlistPageImage(
                                 fileKey = fileKey,
-                                pageIndex = left,
+                                pageIndex = right,
                                 targetWidthPx = targetPageWidthPx,
                                 loader = loader
                             )
-                        }
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            if (right < pageCount) {
-                                PageImage(
-                                    fileKey = fileKey,
-                                    pageIndex = right,
-                                    targetWidthPx = targetPageWidthPx,
-                                    loader = loader
-                                )
-                            } else {
-                                Spacer(Modifier.fillMaxSize())
-                            }
+                        } else {
+                            Spacer(Modifier.fillMaxSize())
                         }
                     }
                 }
@@ -168,7 +206,7 @@ fun PdfViewerScreen(
 }
 
 @Composable
-private fun PageImage(
+private fun SetlistPageImage(
     fileKey: String,
     pageIndex: Int,
     targetWidthPx: Int,
@@ -176,8 +214,6 @@ private fun PageImage(
 ) {
     var bitmap by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Bitmap?>(null) }
     var error by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Throwable?>(null) }
-
-    // 수동 재시도 트리거
     var retryTick by remember(fileKey, pageIndex, targetWidthPx) { mutableIntStateOf(0) }
     var isLoading by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf(false) }
 
@@ -188,7 +224,7 @@ private fun PageImage(
 
         fun log(t: Throwable, attempt: Int) {
             Log.w(
-                "PdfViewer",
+                "SetlistPdfViewer",
                 "render failed fileKey=$fileKey page=$pageIndex width=$targetWidthPx attempt=$attempt : " +
                         "${t.javaClass.simpleName} ${t.message}",
                 t
@@ -196,7 +232,6 @@ private fun PageImage(
         }
 
         try {
-            // 1회 자동 재시도 (총 2회)
             repeat(2) { attempt0 ->
                 val attempt = attempt0 + 1
                 try {
@@ -236,12 +271,6 @@ private fun PageImage(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text("페이지 로딩 실패", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "page=${pageIndex + 1} / width=$targetWidthPx",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Spacer(Modifier.height(10.dp))
                 TextButton(onClick = { retryTick++ }) { Text("다시 시도") }
             }
