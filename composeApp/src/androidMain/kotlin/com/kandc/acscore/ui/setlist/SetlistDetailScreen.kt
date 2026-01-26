@@ -5,7 +5,6 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -36,9 +35,15 @@ fun SetlistDetailScreen(
     libraryCandidates: List<ScorePickItem>,
     modifier: Modifier = Modifier,
     onBack: () -> Unit = {},
-    // ✅ orderedIds 포함
-    onOpenViewer: (scoreId: String, title: String, fileName: String, orderedIds: List<String>) -> Unit =
+    /**
+     * ✅ "세트리스트 이어보기"로 열기 요청
+     * - setlistTitle: 탭 이름으로 쓸 세트리스트명
+     * - orderedIds: setlist에 들어있는 scoreId 순서
+     * - initialScoreId: 사용자가 누른 곡(이 곡 첫 페이지로 시작)
+     */
+    onOpenSetlistViewer: (setlistId: String, setlistTitle: String, orderedIds: List<String>, initialScoreId: String) -> Unit =
         { _, _, _, _ -> },
+
     onRequestPickFromLibrary: ((currentItemIds: List<String>) -> Unit)? = null,
     onReorderItems: (setlistId: String, newItemIds: List<String>) -> Unit,
 ) {
@@ -49,19 +54,16 @@ fun SetlistDetailScreen(
     // id -> item
     val map = remember(libraryCandidates) { libraryCandidates.associateBy { it.scoreId } }
 
-    // ✅ 현재 setlist 순서 (viewer 이어열기에도 사용)
-    val orderedIds = setlist?.itemIds.orEmpty()
+    val current = setlist
+    val currentIds = current?.itemIds.orEmpty()
 
     // ✅ UI state list (드래그/삭제 즉시 반영)
-    // setlist.itemIds가 바뀌면 uiIds를 재구성해야 함 (remember key로 처리)
-    val uiIds = remember(setlistId, orderedIds) {
-        mutableStateListOf<String>().apply { addAll(orderedIds) }
+    val uiIds = remember(setlistId, currentIds) {
+        mutableStateListOf<String>().apply { addAll(currentIds) }
     }
 
     // (백업) 다이얼로그 방식 유지
     var showPicker by rememberSaveable { mutableStateOf(false) }
-
-    val current = setlist
 
     Scaffold(
         modifier = modifier,
@@ -82,12 +84,9 @@ fun SetlistDetailScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            val ids = setlist?.itemIds.orEmpty()
-                            if (onRequestPickFromLibrary != null) {
-                                onRequestPickFromLibrary(ids)
-                            } else {
-                                showPicker = true
-                            }
+                            val ids = current?.itemIds.orEmpty()
+                            if (onRequestPickFromLibrary != null) onRequestPickFromLibrary(ids)
+                            else showPicker = true
                         }
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Add")
@@ -96,54 +95,38 @@ fun SetlistDetailScreen(
             )
         }
     ) { padding ->
-
         if (current == null) {
             Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
-            ) {
-                Text("세트리스트를 불러올 수 없어요.")
-            }
+            ) { Text("세트리스트를 불러올 수 없어요.") }
             return@Scaffold
         }
 
         if (uiIds.isEmpty()) {
             Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
-            ) {
-                Text("아직 곡이 없어요.\n오른쪽 상단 +로 추가해보세요.")
-            }
+            ) { Text("아직 곡이 없어요.\n오른쪽 상단 +로 추가해보세요.") }
         } else {
             ReorderableIdList(
                 ids = uiIds,
-                idToTitle = { id -> map[id]?.title ?: "" },
+                idToTitle = { id -> map[id]?.title ?: "(라이브러리 없음)" },
                 idToSubtitle = { id -> map[id]?.fileName ?: "" },
                 onClick = { id ->
-                    val item = map[id] ?: return@ReorderableIdList
-                    // ✅ orderedIds는 "현재 UI 순서(uiIds)" 기준이 더 정확함 (reorder 후 바로 반영)
-                    onOpenViewer(item.scoreId, item.title, item.fileName, uiIds.toList())
+                    // ✅ "세트리스트 이어보기"로 열기
+                    val title = current.name.ifBlank { "Setlist" }
+                    onOpenSetlistViewer(setlistId, title, uiIds.toList(), id)
                 },
                 onDelete = { id ->
-                    // ✅ UI 즉시 반영
                     uiIds.remove(id)
-
-                    // ✅ DB 반영(기존 로직 유지)
                     vm.remove(id)
-
-                    // ✅ itemIds 확정 저장(삭제도 reorder로 확정)
                     onReorderItems(setlistId, uiIds.toList())
                 },
                 onReorderCommitted = { newOrder ->
                     onReorderItems(setlistId, newOrder)
                 },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
+                modifier = Modifier.fillMaxSize().padding(padding)
             )
         }
     }
@@ -180,7 +163,7 @@ private fun ScorePickerDialog(
                 Text("라이브러리에 악보가 없어요.")
             } else {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    items(candidates, key = { it.scoreId }) { item ->
+                    itemsIndexed(candidates, key = { _, it -> it.scoreId }) { _, item ->
                         val already = selectedIds.contains(item.scoreId)
                         ListItem(
                             headlineContent = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -212,14 +195,14 @@ private fun ReorderableIdList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // ✅ auto-scroll throttle
+    // ✅ 자동 스크롤 throttle
     var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
     fun requestAutoScroll(delta: Float) {
         if (autoScrollJob?.isActive == true) return
         autoScrollJob = scope.launch {
             listState.scrollBy(delta)
-            delay(16L) // ~60fps
+            delay(16L)
         }
     }
 
@@ -232,11 +215,6 @@ private fun ReorderableIdList(
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         itemsIndexed(ids, key = { _, id -> id }) { _, id ->
-
-            val title = idToTitle(id)
-            // ✅ "기존(라이브러리 없음)" 같은 표시 원치 않으면: 그냥 빈 문자열이면 숨김 처리
-            val safeTitle = title.ifBlank { id }
-
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -252,7 +230,6 @@ private fun ReorderableIdList(
                                 autoScrollJob = null
                             },
                             onDrag = { change, _ ->
-                                // ✅ 드래그 중 스크롤/이동 이벤트 소모
                                 change.consumePositionChange()
 
                                 val layout = listState.layoutInfo
@@ -260,36 +237,30 @@ private fun ReorderableIdList(
                                 val current = visible.firstOrNull { it.key == id }
                                     ?: return@detectDragGesturesAfterLongPress
 
-                                // ✅ 포인터의 "뷰포트 기준 Y"를 안정적으로 잡기
-                                // change.position.y 는 해당 아이템 컴포저블 내부 좌표라서,
-                                // item의 top offset + localY = viewportY
-                                val pointerY = current.offset + change.position.y
+                                // ✅ viewport 기준 손가락 y
+                                val pointerYInViewport = current.offset + change.position.y
 
-                                // ✅ target: 가장 가까운 center
+                                // ✅ 가장 가까운 center로 target 선택
                                 val target = visible.minByOrNull { info ->
                                     val center = info.offset + info.size / 2
-                                    abs(center - pointerY)
+                                    abs(center - pointerYInViewport)
                                 } ?: return@detectDragGesturesAfterLongPress
 
                                 val from = ids.indexOf(id)
                                 val to = ids.indexOf(target.key as String)
                                 if (from != -1 && to != -1 && from != to) {
-                                    val moving = ids.removeAt(from)
-                                    ids.add(to, moving)
+                                    val item = ids.removeAt(from)
+                                    ids.add(to, item)
                                 }
 
-                                // ✅ auto-scroll (viewport 기준)
+                                // ✅ auto scroll
                                 val viewportTop = layout.viewportStartOffset.toFloat()
                                 val viewportBottom = layout.viewportEndOffset.toFloat()
+                                val distToTop = pointerYInViewport - viewportTop
+                                val distToBottom = viewportBottom - pointerYInViewport
 
-                                val distToTop = pointerY - viewportTop
-                                val distToBottom = viewportBottom - pointerY
-
-                                if (distToTop < edgeThresholdPx) {
-                                    requestAutoScroll(-scrollStepPx)
-                                } else if (distToBottom < edgeThresholdPx) {
-                                    requestAutoScroll(scrollStepPx)
-                                }
+                                if (distToTop < edgeThresholdPx) requestAutoScroll(-scrollStepPx)
+                                else if (distToBottom < edgeThresholdPx) requestAutoScroll(scrollStepPx)
                             }
                         )
                     }
@@ -308,11 +279,10 @@ private fun ReorderableIdList(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = safeTitle,
+                            text = idToTitle(id),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-
                         val sub = idToSubtitle(id)
                         if (sub.isNotBlank()) {
                             Spacer(Modifier.height(2.dp))

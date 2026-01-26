@@ -67,7 +67,8 @@ fun TabbedViewerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = tab.request.title,
+                                // ✅ 여기: tabTitle 사용
+                                text = tab.tabTitle,
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier
                                     .padding(end = 8.dp)
@@ -107,18 +108,18 @@ fun TabbedViewerScreen(
             val setlistReqs = active.setlistRequests
 
             if (setlistReqs != null) {
-                // ✅ Setlist 연결 Viewer (스와이프로 곡 넘어감)
                 SetlistPdfViewerScreen(
                     requests = setlistReqs,
                     initialScoreId = active.request.scoreId,
                     modifier = Modifier.fillMaxSize(),
                     initialGlobalPage = active.lastPage,
+                    jumpToScoreId = active.jumpToScoreId,
+                    jumpToken = active.jumpToken,
                     onGlobalPageChanged = { page ->
                         sessionStore.updateLastPage(active.tabId, page)
                     }
                 )
             } else {
-                // ✅ 일반 단일 PDF
                 PdfViewerScreen(
                     request = active.request,
                     modifier = Modifier.fillMaxSize(),

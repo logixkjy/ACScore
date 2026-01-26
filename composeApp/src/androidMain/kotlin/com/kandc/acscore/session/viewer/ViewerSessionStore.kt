@@ -8,68 +8,37 @@ import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.UUID
 
-enum class ViewerTabMode { Single, Setlist }
-
 data class ViewerTabState(
     val tabId: String,
-    val mode: ViewerTabMode = ViewerTabMode.Single,
-
-    // ✅ 현재 표시용 request (Single은 이 값이 실제 파일)
-    // ✅ Setlist는 "현재 선택된 곡"을 의미 (title 표시/탭 내부에서 현재 곡 추적용)
     val request: ViewerOpenRequest,
-
-    // ✅ 마지막 페이지(단일: pdf page, 세트리스트: "global page" 또는 네가 정의한 값)
     val lastPage: Int = 0,
 
-    // ---------- Setlist 모드에서만 ----------
+    // ✅ 탭 표시용 제목 (단일: 곡명, 세트리스트: 세트리스트명)
+    val tabTitle: String = request.title,
+
+    // ✅ setlist 모드면 채워짐
     val setlistId: String? = null,
-    val setlistName: String? = null,
     val setlistRequests: List<ViewerOpenRequest>? = null,
 
-    // ✅ 이미 열려있는 세트리스트 탭을 "특정 곡으로 점프"시키기 위한 트리거
-    // 탭 뷰어에서 소비 후 clearPendingJump(tabId)로 지워주면 됨.
-    val pendingJumpScoreId: String? = null
+    // ✅ "이미 열린 세트리스트 탭"을 다른 곡으로 점프시키기 위한 트리거
+    val jumpToScoreId: String? = null,
+    val jumpToken: Long = 0L,
 )
 
 data class ViewerSessionState(
-    val tabs: List<ViewerTabState> = emptyList(),
+    val tabs: List<ViewerTabState> = emptyList(), // MRU (0번이 최신)
     val activeTabId: String? = null
 )
 
-// -------------------------
-// ✅ Snapshot (Persistence)
-// -------------------------
-data class ViewerSessionSnapshot(
-    val tabs: List<TabSnapshot>,
-    val activeTabId: String?
-) {
-    data class TabSnapshot(
-        val tabId: String,
-        val mode: String,
-        val scoreId: String,
-        val title: String,
-        val filePath: String,
-        val lastPage: Int,
-        val setlistId: String? = null,
-        val setlistName: String? = null,
-        val setlistRequests: List<ReqSnapshot>? = null
-    )
-
-    data class ReqSnapshot(
-        val scoreId: String,
-        val title: String,
-        val filePath: String
-    )
-}
-
 class ViewerSessionStore(
-    // ✅ 탭 닫힐 때 정리 필요하면 사용 (PdfBitmapCache clear 등)
     private val onTabClosed: (filePath: String) -> Unit = {}
 ) {
     private val _state = MutableStateFlow(ViewerSessionState())
     val state: StateFlow<ViewerSessionState> = _state.asStateFlow()
 
-    // ✅ MRU(최근 사용) 앞으로 이동
+    // -------------------------
+    // MRU utils
+    // -------------------------
     private fun moveToFront(list: List<ViewerTabState>, tabId: String): List<ViewerTabState> {
         val idx = list.indexOfFirst { it.tabId == tabId }
         if (idx <= 0) return list
@@ -111,68 +80,69 @@ class ViewerSessionStore(
                     }
                 }
 
-            val finalTabs = if (nextActive != null) moveToFront(remaining, nextActive) else remaining
+            val finalTabs =
+                if (nextActive != null) moveToFront(remaining, nextActive) else remaining
+
             s.copy(tabs = finalTabs, activeTabId = nextActive)
         }
 
-        if (closingFilePath != null) {
-            runCatching { onTabClosed(closingFilePath) }
-        }
+        if (closingFilePath != null) runCatching { onTabClosed(closingFilePath) }
     }
 
-    fun updateLastPage(tabId: String, page: Int) {
+    fun updateLastPage(tabId: String, lastPage: Int) {
         _state.update { s ->
-            s.copy(
-                tabs = s.tabs.map { t ->
-                    if (t.tabId == tabId) t.copy(lastPage = page) else t
-                }
-            )
+            val updated = s.tabs.map { t ->
+                if (t.tabId == tabId) t.copy(lastPage = lastPage) else t
+            }
+            s.copy(tabs = updated)
         }
     }
 
-    /**
-     * ✅ 단일 PDF 열기 (중복이면 활성화)
-     */
+    // -------------------------
+    // Single open
+    // -------------------------
     fun openOrActivate(request: ViewerOpenRequest) {
         _state.update { s ->
+            // ✅ 단일 탭은 setlistRequests==null 인 탭 중에서만 중복 처리
             val existing = s.tabs.firstOrNull {
-                it.mode == ViewerTabMode.Single && it.request.filePath == request.filePath
+                it.setlistRequests == null && it.request.filePath == request.filePath
             }
             if (existing != null) {
                 val reordered = moveToFront(s.tabs, existing.tabId)
                 s.copy(tabs = reordered, activeTabId = existing.tabId)
             } else {
-                val tabId = UUID.randomUUID().toString()
                 val newTab = ViewerTabState(
-                    tabId = tabId,
-                    mode = ViewerTabMode.Single,
+                    tabId = UUID.randomUUID().toString(),
                     request = request,
-                    lastPage = 0
+                    lastPage = 0,
+                    tabTitle = request.title,
+                    setlistId = null,
+                    setlistRequests = null
                 )
                 s.copy(
                     tabs = listOf(newTab) + s.tabs,
-                    activeTabId = tabId
+                    activeTabId = newTab.tabId
                 )
             }
         }
     }
 
     /**
-     * ✅ 여러 PDF를 한 번에 열기 (중복 제거)
-     * (ViewerComponentImpl에서 쓰던 openMany 미해결 문제 해결용)
+     * ✅ 여러 개 단일 탭 열기(중복 제거)
      */
     fun openMany(requests: List<ViewerOpenRequest>, initialActiveIndex: Int = 0) {
         if (requests.isEmpty()) return
 
         _state.update { s ->
             val existingByPath = s.tabs
-                .filter { it.mode == ViewerTabMode.Single }
+                .filter { it.setlistRequests == null }
                 .associateBy { it.request.filePath }
 
             val targetReq = requests.getOrNull(initialActiveIndex)
             val alreadyTargetTab = targetReq?.let { existingByPath[it.filePath] }
 
             val newOnes = requests.filter { it.filePath !in existingByPath }
+
             if (newOnes.isEmpty()) {
                 if (alreadyTargetTab != null) {
                     val reordered = moveToFront(s.tabs, alreadyTargetTab.tabId)
@@ -184,18 +154,20 @@ class ViewerSessionStore(
             val newTabs = newOnes.map { req ->
                 ViewerTabState(
                     tabId = UUID.randomUUID().toString(),
-                    mode = ViewerTabMode.Single,
                     request = req,
-                    lastPage = 0
+                    lastPage = 0,
+                    tabTitle = req.title
                 )
             }
 
             val merged = newTabs + s.tabs
+
             val activeTabId =
                 when {
                     alreadyTargetTab != null -> alreadyTargetTab.tabId
-                    targetReq != null -> newTabs.firstOrNull { it.request.filePath == targetReq.filePath }?.tabId
-                        ?: newTabs.first().tabId
+                    targetReq != null ->
+                        newTabs.firstOrNull { it.request.filePath == targetReq.filePath }?.tabId
+                            ?: newTabs.first().tabId
                     else -> newTabs.first().tabId
                 }
 
@@ -204,97 +176,84 @@ class ViewerSessionStore(
         }
     }
 
+    // -------------------------
+    // Setlist open/activate + jump
+    // -------------------------
     /**
-     * ✅ Setlist 이어보기 탭 열기/활성화 (핵심)
-     * - tab title은 setlistName
-     * - 이미 열려 있으면 그 탭 활성화 + pendingJumpScoreId 갱신(=중간 곡으로 점프)
-     * - 없으면 새 setlist 탭 생성
+     * ✅ setlist 탭:
+     * - setlistId가 같은 탭이 이미 있으면: 그 탭 활성화 + jumpToScoreId 갱신(점프) + setlistRequests 갱신
+     * - 없으면 새 탭 생성
      */
-    fun openSetlistOrActivate(
+    fun openSetlist(
         setlistId: String,
-        setlistName: String,
+        setlistTitle: String,
         requests: List<ViewerOpenRequest>,
         initialScoreId: String? = null
     ) {
         if (requests.isEmpty()) return
 
         _state.update { s ->
-            val existing = s.tabs.firstOrNull {
-                it.mode == ViewerTabMode.Setlist && it.setlistId == setlistId
-            }
-
-            if (existing != null) {
-                val updated = s.tabs.map { t ->
-                    if (t.tabId == existing.tabId) {
-                        // ✅ order가 바뀌었을 수 있으니 requests도 갱신
-                        // ✅ 점프 요청도 갱신
-                        t.copy(
-                            setlistName = setlistName,
-                            setlistRequests = requests,
-                            pendingJumpScoreId = initialScoreId
-                        )
-                    } else t
-                }
-                val reordered = moveToFront(updated, existing.tabId)
-                return@update s.copy(tabs = reordered, activeTabId = existing.tabId)
-            }
+            val existing = s.tabs.firstOrNull { it.setlistId == setlistId && it.setlistRequests != null }
 
             val startIndex = initialScoreId?.let { id ->
                 requests.indexOfFirst { it.scoreId == id }.takeIf { it >= 0 }
             } ?: 0
 
-            val tabId = UUID.randomUUID().toString()
+            if (existing != null) {
+                val updatedTabs = s.tabs.map { t ->
+                    if (t.tabId != existing.tabId) t
+                    else t.copy(
+                        request = requests[startIndex],
+                        tabTitle = setlistTitle,
+                        setlistId = setlistId,
+                        setlistRequests = requests,
+
+                        // ✅ 점프 트리거
+                        jumpToScoreId = requests[startIndex].scoreId,
+                        jumpToken = t.jumpToken + 1,
+
+                        // ✅ 선택 곡 "첫 페이지"로 다시 시작하고 싶으면 lastPage를 -1로
+                        lastPage = -1
+                    )
+                }
+
+                val reordered = moveToFront(updatedTabs, existing.tabId)
+                return@update s.copy(tabs = reordered, activeTabId = existing.tabId)
+            }
+
             val newTab = ViewerTabState(
-                tabId = tabId,
-                mode = ViewerTabMode.Setlist,
-                request = requests[startIndex],          // "현재 곡" 표시용
-                lastPage = 0,                            // setlist viewer에서 계산/갱신
+                tabId = UUID.randomUUID().toString(),
+                request = requests[startIndex],
+                lastPage = -1, // ✅ initialScoreId 기준 시작
+                tabTitle = setlistTitle,
                 setlistId = setlistId,
-                setlistName = setlistName,
                 setlistRequests = requests,
-                pendingJumpScoreId = initialScoreId      // 새 탭도 동일하게 start 처리 가능
+                jumpToScoreId = requests[startIndex].scoreId,
+                jumpToken = 1L
             )
 
             s.copy(
                 tabs = listOf(newTab) + s.tabs,
-                activeTabId = tabId
-            )
-        }
-    }
-
-    /**
-     * ✅ Setlist 탭에서 점프 소비 후 호출(한 번만 실행되게)
-     */
-    fun clearPendingJump(tabId: String) {
-        _state.update { s ->
-            s.copy(
-                tabs = s.tabs.map { t ->
-                    if (t.tabId == tabId) t.copy(pendingJumpScoreId = null) else t
-                }
+                activeTabId = newTab.tabId
             )
         }
     }
 
     // -------------------------
-    // ✅ Snapshot persistence
+    // Persistence (기존 스냅샷 유지)
+    // - MVP: 단일 탭 복원은 OK
+    // - setlist 탭은 setlistRequests를 스냅샷에 포함하지 않으므로 "단일처럼" 복원됨
     // -------------------------
     fun toSnapshot(): ViewerSessionSnapshot {
         val st = _state.value
         return ViewerSessionSnapshot(
             tabs = st.tabs.map { tab ->
-                val mode = tab.mode.name
                 ViewerSessionSnapshot.TabSnapshot(
                     tabId = tab.tabId,
-                    mode = mode,
                     scoreId = tab.request.scoreId,
                     title = tab.request.title,
                     filePath = tab.request.filePath,
-                    lastPage = tab.lastPage,
-                    setlistId = tab.setlistId,
-                    setlistName = tab.setlistName,
-                    setlistRequests = tab.setlistRequests?.map {
-                        ViewerSessionSnapshot.ReqSnapshot(it.scoreId, it.title, it.filePath)
-                    }
+                    lastPage = tab.lastPage
                 )
             },
             activeTabId = st.activeTabId
@@ -302,34 +261,20 @@ class ViewerSessionStore(
     }
 
     fun restoreFromSnapshot(snapshot: ViewerSessionSnapshot) {
-        val restoredTabs: List<ViewerTabState> = snapshot.tabs.mapNotNull { snap ->
-            val mode = runCatching { ViewerTabMode.valueOf(snap.mode) }.getOrNull() ?: ViewerTabMode.Single
-
+        val restoredTabs: List<ViewerTabState> = snapshot.tabs.mapNotNull { tab ->
             val req = ViewerOpenRequest(
-                scoreId = snap.scoreId,
-                title = snap.title,
-                filePath = snap.filePath
+                scoreId = tab.scoreId,
+                title = tab.title,
+                filePath = tab.filePath
             )
-
-            // ✅ 파일 없는 탭은 복원 제외(단일)
-            if (mode == ViewerTabMode.Single) {
-                val f = File(req.filePath)
-                if (!f.exists()) return@mapNotNull null
-            }
-
-            val setlistReqs = snap.setlistRequests?.map { r ->
-                ViewerOpenRequest(r.scoreId, r.title, r.filePath)
-            }
+            val f = File(req.filePath)
+            if (!f.exists()) return@mapNotNull null
 
             ViewerTabState(
-                tabId = snap.tabId,
-                mode = mode,
+                tabId = tab.tabId,
                 request = req,
-                lastPage = snap.lastPage,
-                setlistId = snap.setlistId,
-                setlistName = snap.setlistName,
-                setlistRequests = setlistReqs,
-                pendingJumpScoreId = null
+                lastPage = tab.lastPage,
+                tabTitle = req.title,
             )
         }
 

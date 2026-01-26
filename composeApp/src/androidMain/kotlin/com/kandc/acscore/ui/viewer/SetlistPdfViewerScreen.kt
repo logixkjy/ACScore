@@ -32,6 +32,8 @@ fun SetlistPdfViewerScreen(
     initialScoreId: String?,
     modifier: Modifier = Modifier,
     initialGlobalPage: Int = 0,
+    jumpToScoreId: String? = null,
+    jumpToken: Long = 0L,
     onGlobalPageChanged: (Int) -> Unit = {}
 ) {
     val layout = rememberViewerLayout()
@@ -40,16 +42,8 @@ fun SetlistPdfViewerScreen(
     val pageSpacing = 10.dp
     val twoUpInnerGap = 12.dp
 
-    // ✅ 세트리스트는 "1-up" 기준으로 합산 페이지를 만든다.
-    // (2-up은 각 파일별 2-up row 계산이 꼬이기 쉬워서 MVP에서는 1-up 권장)
-    // 그래도 현재 layout.columns를 존중하되, total paging은 1-up으로 하고
-    // 2-up이 켜져있으면 한 globalPage에서 2장을 보여주는 방식으로만 처리한다.
-    // -> 즉, globalPagerCount는 (layout.columns==2) ? rowCountTotal : pageTotal
-    // 여기서는 파일별 pageCount를 구한 뒤, layout.columns에 맞게 pagerCount를 만든다.
-
     val cache = remember { PdfBitmapCache.default() }
 
-    // holders / loaders (세트리스트 전체를 이어서 넘기기 위해 여러 PDF를 열어둠)
     val holders = remember(requests) {
         requests.associate { r -> r.filePath to AndroidPdfRendererHolder(r.filePath) }
     }
@@ -83,7 +77,6 @@ fun SetlistPdfViewerScreen(
         return
     }
 
-    // prefix sums: global 0..total-1
     val prefix = remember(counts) {
         val p = IntArray(counts.size + 1)
         for (i in counts.indices) p[i + 1] = p[i] + counts[i]
@@ -93,7 +86,6 @@ fun SetlistPdfViewerScreen(
 
     fun findFileIndexByGlobalPage(globalPage: Int): Int {
         val g = globalPage.coerceIn(0, totalPages - 1)
-        // linear search is ok for MVP; can be binary if needed
         for (i in 0 until counts.size) {
             if (g < prefix[i + 1]) return i
         }
@@ -105,17 +97,23 @@ fun SetlistPdfViewerScreen(
         return (g - prefix[fileIndex]).coerceAtLeast(0)
     }
 
+    fun globalPageForScoreId(scoreId: String?): Int? {
+        if (scoreId.isNullOrBlank()) return null
+        val idx = requests.indexOfFirst { it.scoreId == scoreId }
+        if (idx < 0) return null
+        return prefix[idx].coerceIn(0, totalPages - 1)
+    }
+
     val initialIndex = remember(requests, initialScoreId) {
         initialScoreId?.let { id ->
             requests.indexOfFirst { it.scoreId == id }.takeIf { it >= 0 }
         } ?: 0
     }
 
-    val initialGlobal = remember(initialIndex, counts, prefix, initialGlobalPage) {
-        // 기존 저장(global)이 있으면 그걸 우선
-        if (initialGlobalPage in 0 until totalPages) return@remember initialGlobalPage
-        // 아니면 initialScore의 첫 페이지로
-        prefix[initialIndex].coerceIn(0, totalPages - 1)
+    val initialGlobal = remember(initialIndex, prefix, initialGlobalPage, totalPages) {
+        // ✅ lastPage 저장값이 -1이면 “선택 곡 첫 페이지”로 시작
+        if (initialGlobalPage in 0 until totalPages) initialGlobalPage
+        else prefix[initialIndex].coerceIn(0, totalPages - 1)
     }
 
     val pagerState = rememberPagerState(
@@ -123,7 +121,15 @@ fun SetlistPdfViewerScreen(
         pageCount = { totalPages }
     )
 
-    // page save
+    // ✅ 외부에서 "점프" 요청이 오면 (이미 열린 탭이어도) 해당 곡 첫 페이지로 이동
+    LaunchedEffect(jumpToken) {
+        if (jumpToken <= 0L) return@LaunchedEffect
+        val target = globalPageForScoreId(jumpToScoreId) ?: return@LaunchedEffect
+        if (pagerState.currentPage != target) {
+            pagerState.scrollToPage(target)
+        }
+    }
+
     LaunchedEffect(pagerState.currentPage) {
         onGlobalPageChanged(pagerState.currentPage.coerceIn(0, totalPages - 1))
     }
@@ -169,7 +175,6 @@ fun SetlistPdfViewerScreen(
                     )
                 }
             } else {
-                // 2-up: local page를 기준으로 "짝"을 맞춘다
                 val left = (local / 2) * 2
                 val right = left + 1
                 val pageCount = counts[fileIdx]
