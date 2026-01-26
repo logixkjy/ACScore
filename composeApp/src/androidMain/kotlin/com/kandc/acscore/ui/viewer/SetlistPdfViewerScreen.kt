@@ -115,10 +115,9 @@ fun SetlistPdfViewerScreen(
     }
 
     val initialGlobal = remember(initialIndex, counts, prefix, initialGlobalPage) {
-        if (initialGlobalPage >= 0) {
-            initialGlobalPage.coerceIn(0, totalPages - 1)
-        } else {
-            prefix[initialIndex].coerceIn(0, totalPages - 1)
+        when {
+            initialGlobalPage >= 0 -> initialGlobalPage.coerceIn(0, totalPages - 1)
+            else -> prefix[initialIndex].coerceIn(0, totalPages - 1)
         }
     }
 
@@ -134,14 +133,27 @@ fun SetlistPdfViewerScreen(
     )
 
     // page save
-    LaunchedEffect(pagerState.currentPage) {
+    var allowSave by remember { mutableStateOf(false) }
+
+// 첫 렌더 안정화 후에만 저장 허용
+    LaunchedEffect(Unit) {
+        delay(300)
+        allowSave = true
+    }
+
+// page save
+    LaunchedEffect(pagerState.currentPage, allowSave) {
+        if (!allowSave) return@LaunchedEffect
         onGlobalPageChanged(pagerState.currentPage.coerceIn(0, totalPages - 1))
     }
 
     // ✅ 이미 열린 세트리스트 탭에서 "다른 곡 선택" 시 점프
     val scope = rememberCoroutineScope()
     LaunchedEffect(jumpToken) {
-        val target = globalPageForScoreFirstPage(jumpToScoreId)
+        if (jumpToken <= 0L) return@LaunchedEffect
+        val id = jumpToScoreId ?: return@LaunchedEffect
+
+        val target = globalPageForScoreFirstPage(id)
         if (target != pagerState.currentPage) {
             scope.launch { pagerState.animateScrollToPage(target) }
         }

@@ -1,5 +1,6 @@
 package com.kandc.acscore.session.viewer
 
+import android.util.Log
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -271,29 +272,37 @@ class ViewerSessionStore(
                         ?: requests.firstOrNull { it.filePath == tab.filePath }
                         ?: requests.first()
 
+                // ✅ 여기서 lastPage는 그대로 쓰되, 나중에 UI에서 totalPages 기준 coerceIn 하거나
+                // ✅ (가능하면 여기서도 음수만 제거)
+                val safeLastPage = tab.lastPage.coerceAtLeast(0)
+
                 ViewerTabState(
-                    tabId = tab.tabId,
+                    tabId = tab.tabId ?: UUID.randomUUID().toString(), // 너 구조에 맞게
                     request = currentReq,
-                    lastPage = tab.lastPage,
-                    tabTitle = tab.title,          // ✅ 탭 제목(=세트리스트명)
-                    setlistId = tab.setlistId,
+                    lastPage = safeLastPage,
+                    tabTitle = tab.title ?: currentReq.title,
+                    setlistId = tab.setlistId,              // 있으면 유지
                     setlistRequests = requests,
+
+                    // ✅ 복원에서는 점프 상태를 무조건 초기화
                     jumpToScoreId = null,
                     jumpToken = 0L
                 )
             } else {
-                val req = ViewerOpenRequest(
-                    scoreId = tab.scoreId,
-                    title = tab.title,
-                    filePath = tab.filePath
-                )
-                if (!File(req.filePath).exists()) return@mapNotNull null
+                // 단일 탭 복원도 동일하게 점프 초기화 권장
+                val safeLastPage = tab.lastPage.coerceAtLeast(0)
 
                 ViewerTabState(
-                    tabId = tab.tabId,
-                    request = req,
-                    lastPage = tab.lastPage,
-                    tabTitle = tab.title
+                    tabId = tab.tabId ?: UUID.randomUUID().toString(),
+                    request = ViewerOpenRequest(tab.scoreId, tab.title, tab.filePath),
+                    lastPage = safeLastPage,
+                    tabTitle = tab.title,
+                    setlistId = null,
+                    setlistRequests = null,
+
+                    // ✅ 단일도 초기화
+                    jumpToScoreId = null,
+                    jumpToken = 0L
                 )
             }
         }
