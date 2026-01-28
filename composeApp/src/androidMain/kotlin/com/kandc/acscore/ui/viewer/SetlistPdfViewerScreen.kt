@@ -36,10 +36,11 @@ fun SetlistPdfViewerScreen(
     modifier: Modifier = Modifier,
     initialGlobalPage: Int = 0,
     onGlobalPageChanged: (Int) -> Unit = {},
-
-    // ✅ 이미 열린 탭 점프 지원
+    onPageCountReady: (Int) -> Unit = {},
+    jumpToGlobalPage: Int? = null,
+    jumpToken: Long = 0L,
     jumpToScoreId: String? = null,
-    jumpToken: Long = 0L
+    jumpTokenScore: Long = 0L
 ) {
     val layout = rememberViewerLayout()
 
@@ -89,6 +90,11 @@ fun SetlistPdfViewerScreen(
     }
     val totalPages = prefix.last().coerceAtLeast(1)
 
+    // ✅ totalPages 준비되면 알려주기
+    LaunchedEffect(totalPages) {
+        if (totalPages > 0) onPageCountReady(totalPages)
+    }
+
     fun findFileIndexByGlobalPage(globalPage: Int): Int {
         val g = globalPage.coerceIn(0, totalPages - 1)
         for (i in 0 until counts.size) {
@@ -126,30 +132,33 @@ fun SetlistPdfViewerScreen(
         pageCount = { totalPages }
     )
 
-    // ✅ fling 동작을 단일 뷰어와 동일하게(명시)
     val fling = PagerDefaults.flingBehavior(
         state = pagerState,
-        snapPositionalThreshold = 0.20f // 기본 0.5 → 훨씬 민감
+        snapPositionalThreshold = 0.20f
     )
 
-    // page save
     var allowSave by remember { mutableStateOf(false) }
-
-// 첫 렌더 안정화 후에만 저장 허용
     LaunchedEffect(Unit) {
         delay(300)
         allowSave = true
     }
 
-// page save
     LaunchedEffect(pagerState.currentPage, allowSave) {
         if (!allowSave) return@LaunchedEffect
         onGlobalPageChanged(pagerState.currentPage.coerceIn(0, totalPages - 1))
     }
 
-    // ✅ 이미 열린 세트리스트 탭에서 "다른 곡 선택" 시 점프
     val scope = rememberCoroutineScope()
-    LaunchedEffect(jumpToken) {
+    LaunchedEffect(jumpToken, totalPages) {
+        if (jumpToken <= 0L) return@LaunchedEffect
+        val target = jumpToGlobalPage ?: return@LaunchedEffect
+        val safe = target.coerceIn(0, totalPages - 1)
+        if (safe != pagerState.currentPage) {
+            scope.launch { pagerState.animateScrollToPage(safe) }
+        }
+    }
+
+    LaunchedEffect(jumpTokenScore) {
         if (jumpToken <= 0L) return@LaunchedEffect
         val id = jumpToScoreId ?: return@LaunchedEffect
 
@@ -179,7 +188,7 @@ fun SetlistPdfViewerScreen(
             contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
             pageSpacing = pageSpacing,
             flingBehavior = fling,
-            beyondViewportPageCount = 1 // ✅ 다음/이전 한 장 미리 준비 → 스와이프 안정감
+            beyondViewportPageCount = 1
         ) { globalPage ->
             val fileIdx = findFileIndexByGlobalPage(globalPage)
             val local = localPageOf(globalPage, fileIdx)

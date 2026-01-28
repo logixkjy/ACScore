@@ -33,11 +33,13 @@ fun PdfViewerScreen(
     modifier: Modifier = Modifier,
     initialPage: Int = 0,
     onPageChanged: (Int) -> Unit = {},
-    onError: (Throwable) -> Unit = {}
+    onPageCountReady: (Int) -> Unit = {},
+    onError: (Throwable) -> Unit = {},
+    jumpToGlobalPage: Int? = null,
+    jumpToken: Long = 0L
 ) {
     val layout = rememberViewerLayout()
 
-    // “책 넘김” 느낌 튜닝값
     val sidePadding = 20.dp
     val pageSpacing = 10.dp
     val twoUpInnerGap = 12.dp
@@ -55,6 +57,11 @@ fun PdfViewerScreen(
     var pageCount by remember(holder) { mutableStateOf(0) }
     LaunchedEffect(holder) {
         runCatching { pageCount = holder.pageCount() }.onFailure(onError)
+    }
+
+    // ✅ pageCount가 준비되면 알려주기
+    LaunchedEffect(request.filePath, pageCount) {
+        if (pageCount > 0) onPageCountReady(pageCount)
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -94,20 +101,30 @@ fun PdfViewerScreen(
             pageCount = { pagerPageCount }
         )
 
-        // ✅ 스와이프 “되돌아옴” 체감 완화:
-        // - positional threshold를 낮춰서 조금만 넘겨도 다음/이전으로 스냅되게
-        // - velocity threshold도 낮춰서 빠르게 쓸면 잘 넘어가게
+        LaunchedEffect(jumpToken, pageCount, layout.columns) {
+            if (jumpToken <= 0L) return@LaunchedEffect
+            val target = jumpToGlobalPage ?: return@LaunchedEffect
+            if (pageCount <= 0) return@LaunchedEffect
+
+            val safe = target.coerceIn(0, pageCount - 1)
+            val targetPagerPage =
+                if (layout.columns == 2) (safe / 2).coerceIn(0, pagerPageCount - 1)
+                else safe.coerceIn(0, pagerPageCount - 1)
+
+            if (targetPagerPage != pagerState.currentPage) {
+                runCatching { pagerState.animateScrollToPage(targetPagerPage) }
+            }
+        }
+
         val fling = PagerDefaults.flingBehavior(
             state = pagerState,
-            snapPositionalThreshold = 0.20f // 기본 0.5 → 훨씬 민감
+            snapPositionalThreshold = 0.20f
         )
 
-        // PDF/레이아웃 변경 시 해당 페이지로 이동(탭 전환 대응)
         LaunchedEffect(request.filePath, layout.columns, pagerPageCount, startPage) {
             runCatching { pagerState.scrollToPage(startPage) }
         }
 
-        // 현재 페이지 저장
         LaunchedEffect(request.filePath, layout.columns, pagerState.currentPage) {
             val current = if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
             onPageChanged(current.coerceAtLeast(0))

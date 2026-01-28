@@ -1,5 +1,6 @@
 package com.kandc.acscore.ui.main
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -11,22 +12,35 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-
 import androidx.compose.ui.Modifier
 import com.kandc.acscore.ui.setlist.SetlistListScreen
 
-/**
- * MVP v1: 하단 탭으로 "Library / Setlists"
- * - Import 탭은 T1에서 이미 상단 버튼/액션으로도 가능했고,
- *   원하면 T5 이후에 3탭으로 확장하기 쉽도록 구조만 잡아둠.
- */
 @Composable
 fun MainTabsScreen(
     modifier: Modifier = Modifier,
     libraryContent: @Composable () -> Unit,
     onOpenSetlist: (setlistId: String) -> Unit = {},
+
+    // ✅ T6-3: 마지막 선택 화면 기반 초기 탭 복원
+    initialTab: MainTab = MainTab.Library,
+    initialOpenSetlistId: String? = null,
+
+    // (선택) 탭 전환 시 외부 저장이 필요하면 연결
+    onTabChanged: (MainTab) -> Unit = {}
 ) {
-    var selected by rememberSaveable { mutableStateOf(MainTab.Library) }
+    var selected by rememberSaveable(initialTab.name) { mutableStateOf(initialTab) }
+
+    LaunchedEffect(selected) {
+        onTabChanged(selected)
+    }
+
+    // ✅ 처음 1회: setlist detail로 시작해야 하면 자동 진입 트리거
+    LaunchedEffect(initialOpenSetlistId, selected) {
+        val id = initialOpenSetlistId ?: return@LaunchedEffect
+        if (selected == MainTab.Setlists) {
+            onOpenSetlist(id)
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -49,10 +63,7 @@ fun MainTabsScreen(
     ) { padding ->
         when (selected) {
             MainTab.Library -> {
-                // 기존 Library 화면을 그대로 주입
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier.padding(padding)
-                ) { libraryContent() }
+                Box(modifier = Modifier.padding(padding)) { libraryContent() }
             }
             MainTab.Setlists -> {
                 SetlistListScreen(
@@ -64,4 +75,4 @@ fun MainTabsScreen(
     }
 }
 
-private enum class MainTab { Library, Setlists }
+enum class MainTab { Library, Setlists }

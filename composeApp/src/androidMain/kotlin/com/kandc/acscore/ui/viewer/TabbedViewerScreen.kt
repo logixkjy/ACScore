@@ -15,12 +15,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import com.kandc.acscore.session.viewer.ViewerPickerContext
 import com.kandc.acscore.session.viewer.ViewerSessionStore
 
 @Composable
 fun TabbedViewerScreen(
     sessionStore: ViewerSessionStore,
-    onRequestOpenLibrary: () -> Unit,
+    onRequestOpenPicker: (ViewerPickerContext) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val state by sessionStore.state.collectAsState()
@@ -30,6 +31,7 @@ fun TabbedViewerScreen(
     }
 
     var controlsVisible by remember { mutableStateOf(false) }
+    var pageCount by remember(state.activeTabId) { mutableStateOf<Int?>(null) }
 
     Column(modifier.fillMaxSize()) {
 
@@ -42,7 +44,13 @@ fun TabbedViewerScreen(
                     .padding(top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onRequestOpenLibrary) { Text("Library") }
+                TextButton(
+                    onClick = {
+                        val ctx = active?.returnPicker ?: state.lastPicker
+                        onRequestOpenPicker(ctx)
+                    }
+                ) { Text("Library") }
+
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { controlsVisible = false }) { Text("Hide") }
             }
@@ -67,7 +75,7 @@ fun TabbedViewerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = tab.tabTitle, // ✅ 여기!
+                                text = tab.tabTitle,
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier
                                     .padding(end = 8.dp)
@@ -91,7 +99,9 @@ fun TabbedViewerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("열려있는 악보가 없어요.")
                     Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onRequestOpenLibrary) { Text("Library 열기") }
+                    TextButton(
+                        onClick = { onRequestOpenPicker(state.lastPicker) }
+                    ) { Text("Library 열기") }
                 }
             }
             return
@@ -113,11 +123,43 @@ fun TabbedViewerScreen(
                     initialScoreId = active.request.scoreId,
                     modifier = Modifier.fillMaxSize(),
                     initialGlobalPage = active.lastPage,
-                    jumpToScoreId = active.jumpToScoreId,
-                    jumpToken = active.jumpToken,
                     onGlobalPageChanged = { page ->
                         sessionStore.updateLastPage(latestTabId, page)
-                    }
+                    },
+                    onPageCountReady = { count ->
+                        pageCount = count
+                    },
+                    jumpToGlobalPage = active.jumpToGlobalPage,
+                    jumpToken = active.jumpToken,
+                    jumpToScoreId = active.jumpToScoreId,
+                    jumpTokenScore = active.jumpToken
+                )
+
+                ViewerTransparentControlsOverlay(
+                    enabled = true,
+                    onPrev = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            active.lastPage - 1
+                        )
+                    },
+                    onNext = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            active.lastPage + 1
+                        )
+                    },
+                    onFirst = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            0
+                        )
+                    },
+                )
+
+                ViewerPageIndicatorOverlay(
+                    currentPage = active.lastPage,
+                    pageCount = pageCount
                 )
             } else {
                 PdfViewerScreen(
@@ -126,7 +168,39 @@ fun TabbedViewerScreen(
                     initialPage = active.lastPage,
                     onPageChanged = { page ->
                         sessionStore.updateLastPage(active.tabId, page)
-                    }
+                    },
+                    onPageCountReady = { count ->   // ← 있으면 연결
+                        pageCount = count
+                    },
+                    jumpToGlobalPage = active.jumpToGlobalPage,
+                    jumpToken = active.jumpToken
+                )
+
+                ViewerTransparentControlsOverlay(
+                    enabled = true,
+                    onPrev = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            active.lastPage - 1
+                        )
+                     },
+                    onNext = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            active.lastPage + 1
+                        )
+                     },
+                    onFirst = {
+                        sessionStore.requestJump(
+                            active.tabId,
+                            0
+                        )
+                      },
+                )
+
+                ViewerPageIndicatorOverlay(
+                    currentPage = active.lastPage,
+                    pageCount = pageCount
                 )
             }
         }

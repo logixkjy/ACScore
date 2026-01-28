@@ -22,24 +22,59 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.kandc.acscore.di.SetlistDi
 import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
 import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
+import com.kandc.acscore.session.viewer.ViewerPickerContext
 
 private enum class HomeTab { Library, Setlists }
 
 @Composable
 fun MainHostScreen(component: RootComponent) {
     val overlayOpen by component.isLibraryOverlayOpen.collectAsState()
+    val viewerState by component.viewerSessionStore.state.collectAsState()
+
     var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Library) }
 
     var openedSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
     var pickingForSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
     var pickingSelectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
 
+    // ✅ 앱 시작/복원 시 "마지막 선택 오버레이"를 한 번만 반영
+    var didInitPickerFromSession by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(viewerState.lastPicker, didInitPickerFromSession) {
+        if (didInitPickerFromSession) return@LaunchedEffect
+
+        when (viewerState.lastPicker.kind) {
+            ViewerPickerContext.Kind.Library -> {
+                selectedTab = HomeTab.Library
+                openedSetlistId = null
+            }
+
+            ViewerPickerContext.Kind.SetlistDetail -> {
+                selectedTab = HomeTab.Setlists
+                openedSetlistId = viewerState.lastPicker.setlistId
+            }
+        }
+
+        didInitPickerFromSession = true
+    }
+
     Box(Modifier.fillMaxSize()) {
         TabbedViewerScreen(
             sessionStore = component.viewerSessionStore,
-            onRequestOpenLibrary = {
-                selectedTab = HomeTab.Library
-                openedSetlistId = null
+            onRequestOpenPicker = { ctx ->
+                // ✅ 뷰어 상단 Library 버튼 동작:
+                // "라이브러리 루트로"가 아니라 "마지막 선택 오버레이"로 복귀
+                when (ctx.kind) {
+                    ViewerPickerContext.Kind.Library -> {
+                        selectedTab = HomeTab.Library
+                        openedSetlistId = null
+                    }
+
+                    ViewerPickerContext.Kind.SetlistDetail -> {
+                        selectedTab = HomeTab.Setlists
+                        openedSetlistId = ctx.setlistId
+                    }
+                }
+
                 component.openLibraryOverlay()
             },
             modifier = Modifier.fillMaxSize()
@@ -82,6 +117,9 @@ fun MainHostScreen(component: RootComponent) {
                                 component.onScoreSelected(
                                     ViewerOpenRequest(scoreId = scoreId, title = title, filePath = filePath)
                                 )
+                                // ✅ 단일 악보 열기 = returnPicker는 store에서 Library로 잡히도록(이미 openOrActivate에서 처리)
+                                // 앱 시작 복원을 위해 선택 컨텍스트를 명시로 잡고 싶으면,
+                                // store에 setLastPicker 같은 API를 추가해도 됨(선택).
                             },
                             onPickScore = pickingForSetlistId?.let { targetSetlistId ->
                                 { scoreId, title, fileName ->
@@ -161,6 +199,7 @@ fun MainHostScreen(component: RootComponent) {
 
                                     component.closeLibraryOverlay()
 
+                                    // ✅ store.openSetlist에서 returnPicker/lastPicker가 SetlistDetail로 세팅됨
                                     component.viewerSessionStore.openSetlist(
                                         setlistId = setlistId,
                                         setlistTitle = setlistTitle,
