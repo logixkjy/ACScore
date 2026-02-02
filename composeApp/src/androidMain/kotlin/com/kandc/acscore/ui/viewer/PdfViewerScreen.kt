@@ -2,8 +2,8 @@ package com.kandc.acscore.ui.viewer
 
 import android.graphics.Bitmap
 import android.util.Log
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
@@ -26,17 +26,26 @@ import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
+/**
+ * ✅ 단일 PDF 뷰어
+ * - globalPage(단일 페이지 인덱스)를 기준으로 상태/저장을 통일
+ * - 2-up(가로)일 때만 pager를 spread(스프레드) 단위로 동작시켜 인덱스 꼬임/중복을 방지
+ * - 레이아웃(columns) 변경 시 pagerState를 1회 재생성하여 '첫 페어 중복' / '0↔1 반복'을 방지
+ * - 외부 점프는 jumpToken 기반으로 animateScrollToPage로만 처리
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PdfViewerScreen(
     request: ViewerOpenRequest,
     modifier: Modifier = Modifier,
-    initialPage: Int = 0,
-    onPageChanged: (Int) -> Unit = {},
+    /** 마지막으로 보고 있던 globalPage (0-based) */
+    currentGlobalPage: Int = 0,
+    onGlobalPageChanged: (Int) -> Unit = {},
     onPageCountReady: (Int) -> Unit = {},
     onError: (Throwable) -> Unit = {},
+    /** 버튼/외부 요청에 의한 점프 */
     jumpToGlobalPage: Int? = null,
-    jumpToken: Long = 0L
+    jumpToken: Long = 0L,
 ) {
     val layout = rememberViewerLayout()
 
@@ -54,12 +63,11 @@ fun PdfViewerScreen(
         onDispose { holder.close() }
     }
 
-    var pageCount by remember(holder) { mutableStateOf(0) }
+    var pageCount by remember(holder) { mutableIntStateOf(0) }
     LaunchedEffect(holder) {
         runCatching { pageCount = holder.pageCount() }.onFailure(onError)
     }
 
-    // ✅ pageCount가 준비되면 알려주기
     LaunchedEffect(request.filePath, pageCount) {
         if (pageCount > 0) onPageCountReady(pageCount)
     }
@@ -88,93 +96,100 @@ fun PdfViewerScreen(
             return@BoxWithConstraints
         }
 
-        val pagerPageCount = if (layout.columns == 2) (pageCount + 1) / 2 else pageCount
+        // ✅ pager는 2-up이면 spread 단위로, 1-up이면 page 단위로
+        val spreadCount = remember(pageCount) { (pageCount + 1) / 2 }
+        val pagerPageCount = if (layout.columns == 2) spreadCount else pageCount
 
-        val startPage = remember(request.filePath, layout.columns, pageCount, initialPage) {
-            val safe = initialPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-            if (layout.columns == 2) (safe / 2).coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
-            else safe.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
+        val safeGlobal = remember(currentGlobalPage, pageCount) {
+            currentGlobalPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+        }
+        val initialPagerPage = remember(layout.columns, safeGlobal, pagerPageCount) {
+            val p = if (layout.columns == 2) (safeGlobal / 2) else safeGlobal
+            p.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
         }
 
-        val pagerState = rememberPagerState(
-            initialPage = startPage,
-            pageCount = { pagerPageCount }
-        )
+        // ✅ 레이아웃 변경(특히 1-up <-> 2-up) 시 pagerState를 새로 만들어 꼬임 방지
+        key(request.filePath, layout.columns) {
+            val pagerState = rememberPagerState(
+                initialPage = initialPagerPage,
+                pageCount = { pagerPageCount }
+            )
 
-        LaunchedEffect(jumpToken, pageCount, layout.columns) {
-            if (jumpToken <= 0L) return@LaunchedEffect
-            val target = jumpToGlobalPage ?: return@LaunchedEffect
-            if (pageCount <= 0) return@LaunchedEffect
+            val fling = PagerDefaults.flingBehavior(
+                state = pagerState,
+                snapPositionalThreshold = 0.20f
+            )
 
-            val safe = target.coerceIn(0, pageCount - 1)
-            val targetPagerPage =
-                if (layout.columns == 2) (safe / 2).coerceIn(0, pagerPageCount - 1)
-                else safe.coerceIn(0, pagerPageCount - 1)
+            // ✅ external jump
+            LaunchedEffect(jumpToken, pageCount, layout.columns) {
+                if (jumpToken <= 0L) return@LaunchedEffect
+                val target = jumpToGlobalPage ?: return@LaunchedEffect
+                if (pageCount <= 0) return@LaunchedEffect
 
-            if (targetPagerPage != pagerState.currentPage) {
-                runCatching { pagerState.animateScrollToPage(targetPagerPage) }
-            }
-        }
+                val tg = target.coerceIn(0, pageCount - 1)
+                val tp = if (layout.columns == 2) (tg / 2) else tg
+                val safePager = tp.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
 
-        val fling = PagerDefaults.flingBehavior(
-            state = pagerState,
-            snapPositionalThreshold = 0.20f
-        )
-
-        LaunchedEffect(request.filePath, layout.columns, pagerPageCount, startPage) {
-            runCatching { pagerState.scrollToPage(startPage) }
-        }
-
-        LaunchedEffect(request.filePath, layout.columns, pagerState.currentPage) {
-            val current = if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
-            onPageChanged(current.coerceAtLeast(0))
-        }
-
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            pageSize = PageSize.Fill,
-            contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
-            pageSpacing = pageSpacing,
-            flingBehavior = fling
-        ) { page ->
-            if (layout.columns == 1) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    PageImage(
-                        fileKey = fileKey,
-                        pageIndex = page,
-                        targetWidthPx = targetPageWidthPx,
-                        loader = loader
-                    )
+                if (safePager != pagerState.currentPage) {
+                    runCatching { pagerState.animateScrollToPage(safePager) }
+                        .onFailure { /* ignore */ }
                 }
-            } else {
-                val left = page * 2
-                val right = left + 1
+            }
 
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            PageImage(
-                                fileKey = fileKey,
-                                pageIndex = left,
-                                targetWidthPx = targetPageWidthPx,
-                                loader = loader
-                            )
-                        }
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            if (right < pageCount) {
+            // ✅ save current global page
+            LaunchedEffect(request.filePath, layout.columns, pagerState.currentPage) {
+                val global =
+                    if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
+                onGlobalPageChanged(global.coerceIn(0, pageCount - 1))
+            }
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                pageSize = PageSize.Fill,
+                contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
+                pageSpacing = pageSpacing,
+                flingBehavior = fling,
+                beyondViewportPageCount = 1
+            ) { pagerPage ->
+                if (layout.columns == 1) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        PageImage(
+                            fileKey = fileKey,
+                            pageIndex = pagerPage,
+                            targetWidthPx = targetPageWidthPx,
+                            loader = loader
+                        )
+                    }
+                } else {
+                    val left = pagerPage * 2
+                    val right = left + 1
+
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 PageImage(
                                     fileKey = fileKey,
-                                    pageIndex = right,
+                                    pageIndex = left,
                                     targetWidthPx = targetPageWidthPx,
                                     loader = loader
                                 )
-                            } else {
-                                Spacer(Modifier.fillMaxSize())
+                            }
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                if (right < pageCount) {
+                                    PageImage(
+                                        fileKey = fileKey,
+                                        pageIndex = right,
+                                        targetWidthPx = targetPageWidthPx,
+                                        loader = loader
+                                    )
+                                } else {
+                                    Spacer(Modifier.fillMaxSize())
+                                }
                             }
                         }
                     }
@@ -213,7 +228,6 @@ private fun PageImage(
         }
 
         try {
-            // 1회 자동 재시도 (총 2회)
             repeat(2) { attempt0 ->
                 val attempt = attempt0 + 1
                 try {
