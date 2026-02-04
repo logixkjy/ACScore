@@ -80,7 +80,7 @@ fun MainHostScreen(component: RootComponent) {
             Column(Modifier.fillMaxSize()) {
 
                 SegmentedTabs(
-                    titles = listOf("Library", "Setlists"),
+                    titles = listOf("악보", "곡목록"),
                     selectedIndex = if (selectedTab == HomeTab.Library) 0 else 1,
                     onSelect = { idx ->
                         selectedTab = if (idx == 0) HomeTab.Library else HomeTab.Setlists
@@ -265,8 +265,7 @@ fun MainHostScreen(component: RootComponent) {
                                         setlistId = setlistId,
                                         setlistTitle = setlistTitle,
                                         requests = requests,
-                                        initialScoreId = initialScoreId,
-                                        sourcePicker = ctx
+                                        initialScoreId = initialScoreId
                                     )
                                 },
 

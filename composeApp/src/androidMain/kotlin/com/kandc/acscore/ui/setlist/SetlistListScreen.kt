@@ -49,7 +49,7 @@ fun SetlistListScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Setlists") },
+                title = { Text("곡목록") },
                 actions = {
                     IconButton(onClick = { showCreateDialog = true }) {
                         Icon(

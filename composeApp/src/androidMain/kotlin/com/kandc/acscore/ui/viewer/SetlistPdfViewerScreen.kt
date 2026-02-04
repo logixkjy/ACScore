@@ -25,30 +25,24 @@ import com.kandc.acscore.data.viewer.PdfPageLoader
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-/**
- * ✅ 세트리스트 PDF 뷰어
- * - globalPage(단일 페이지 인덱스)를 기준으로 상태/저장을 통일
- * - 2-up(태블릿 가로)일 때는 pager를 spread 단위로 동작
- * - ✅ 규약 #6: 2-up에서 오른쪽 페이지는 "다음 문서 첫 페이지"까지 포함해 globalRight로 매핑하여 렌더링한다.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SetlistPdfViewerScreen(
     requests: List<ViewerOpenRequest>,
+    initialScoreId: String?,
     modifier: Modifier = Modifier,
-    currentGlobalPage: Int = 0,
+    initialGlobalPage: Int = 0,
     onGlobalPageChanged: (Int) -> Unit = {},
     onPageCountReady: (Int) -> Unit = {},
 
-    // 곡 선택 점프(해당 score 첫 페이지로)
+    // ✅ 곡 선택 점프(세트 상세 목록에서 곡 선택)
     jumpToScoreId: String? = null,
     jumpTokenScore: Long = 0L,
 
-    // 페이지 점프(버튼)
+    // ✅ 페이지 점프(prev/next/first/last)
     jumpToGlobalPage: Int? = null,
-    jumpTokenGlobal: Long = 0L,
+    jumpTokenPage: Long = 0L
 ) {
     val layout = rememberViewerLayout()
 
@@ -58,11 +52,7 @@ fun SetlistPdfViewerScreen(
 
     val cache = remember { PdfBitmapCache.default() }
 
-    val requestsKey = remember(requests) {
-        requests.joinToString("|") { it.filePath }.hashCode()
-    }
-
-    val holders = remember(requestsKey) {
+    val holders = remember(requests) {
         requests.associate { r -> r.filePath to AndroidPdfRendererHolder(r.filePath) }
     }
 
@@ -75,207 +65,236 @@ fun SetlistPdfViewerScreen(
         onDispose { holders.values.forEach { h -> runCatching { h.close() } } }
     }
 
-    var pageCounts by remember(requestsKey) { mutableStateOf<List<Int>?>(null) }
-
-    LaunchedEffect(requestsKey) {
-        val counts = requests.map { r ->
+    // 각 문서 pageCount 취득
+    var counts by remember(requests) { mutableStateOf<List<Int>?>(null) }
+    LaunchedEffect(requests) {
+        counts = requests.map { r ->
             val h = holders[r.filePath]
             runCatching { h?.pageCount() ?: 0 }.getOrElse { 0 }.coerceAtLeast(0)
         }
-        pageCounts = counts
     }
 
-    val counts = pageCounts
-    if (counts == null || counts.isEmpty() || counts.all { it <= 0 }) {
+    val pageCounts = counts
+    if (pageCounts == null || pageCounts.isEmpty() || pageCounts.all { it <= 0 }) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         return
     }
 
-    val prefix = remember(counts) {
-        val p = IntArray(counts.size + 1)
-        for (i in counts.indices) p[i + 1] = p[i] + counts[i]
+    // prefix[i] = i번째 문서 시작 globalPage
+    val prefix = remember(pageCounts) {
+        val p = IntArray(pageCounts.size + 1)
+        for (i in pageCounts.indices) p[i + 1] = p[i] + pageCounts[i]
         p
     }
-    val totalPages = prefix.last().coerceAtLeast(1)
 
+    val totalPages = prefix.last().coerceAtLeast(1)
     LaunchedEffect(totalPages) { onPageCountReady(totalPages) }
 
-    fun findFileIndexByGlobalPage(globalPage: Int): Int {
-        val g = globalPage.coerceIn(0, totalPages - 1)
-        for (i in 0 until counts.size) if (g < prefix[i + 1]) return i
-        return counts.lastIndex
-    }
-
-    fun localPageOf(globalPage: Int, fileIndex: Int): Int {
-        val g = globalPage.coerceIn(0, totalPages - 1)
-        return (g - prefix[fileIndex]).coerceAtLeast(0)
-    }
-
-    fun globalPageForScoreFirstPage(scoreId: String?): Int {
+    fun globalFirstPageOfScore(scoreId: String?): Int {
         if (scoreId == null) return 0
         val idx = requests.indexOfFirst { it.scoreId == scoreId }.takeIf { it >= 0 } ?: 0
         return prefix[idx].coerceIn(0, totalPages - 1)
     }
 
-    val spreadCount = remember(totalPages) { (totalPages + 1) / 2 }
-    val pagerPageCount = if (layout.columns == 2) spreadCount else totalPages
+    // ✅ anchorGlobal = "현재 보고 있는 페어/페이지의 기준(global)"
+    var anchorGlobal by remember(requests) { mutableIntStateOf(0) }
 
-    val safeGlobal = remember(currentGlobalPage, totalPages) {
-        currentGlobalPage.coerceIn(0, totalPages - 1)
+    // ✅ 2-up이면 spread 단위로 페이징 (global 2장 = pager 1장)
+    val pagerPageCount = if (layout.columns == 2) (totalPages + 1) / 2 else totalPages
+
+    fun globalToPager(global: Int): Int {
+        val g = global.coerceIn(0, totalPages - 1)
+        return if (layout.columns == 2) (g / 2).coerceIn(0, pagerPageCount - 1) else g
     }
-    val initialPagerPage = remember(layout.columns, safeGlobal, pagerPageCount) {
-        val p = if (layout.columns == 2) (safeGlobal / 2) else safeGlobal
-        p.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
+
+    fun pagerToGlobalLeft(pager: Int): Int =
+        if (layout.columns == 2) pager * 2 else pager
+
+    // 초기 복원 globalPage 결정
+    val initialIndex = remember(requests, initialScoreId) {
+        initialScoreId?.let { id ->
+            requests.indexOfFirst { it.scoreId == id }.takeIf { it >= 0 }
+        } ?: 0
     }
 
-    // ✅ 레이아웃 변경/세트 변경 시 pagerState 재생성(꼬임 방지)
-    key(requestsKey, layout.columns) {
-        val pagerState = rememberPagerState(
-            initialPage = initialPagerPage,
-            pageCount = { pagerPageCount }
-        )
+    val safeInitialGlobal = remember(initialIndex, initialGlobalPage, totalPages) {
+        val fallback = prefix[initialIndex].coerceIn(0, totalPages - 1)
+        if (initialGlobalPage >= 0) initialGlobalPage.coerceIn(0, totalPages - 1) else fallback
+    }
 
-        val fling = PagerDefaults.flingBehavior(
+    val pagerState = rememberPagerState(
+        initialPage = globalToPager(safeInitialGlobal),
+        pageCount = { pagerPageCount }
+    )
+
+    var readyToReport by remember(requests, layout.columns) { mutableStateOf(false) }
+
+    // ✅ (2) 재실행/복원: 마지막 globalPage로 복원
+    LaunchedEffect(requests, layout.columns, pagerPageCount, safeInitialGlobal) {
+        readyToReport = false
+        anchorGlobal = safeInitialGlobal
+        runCatching { pagerState.scrollToPage(globalToPager(anchorGlobal)) }
+        readyToReport = true
+    }
+
+    // ✅ (3) 세트리스트 목록에서 곡 선택 점프: 선택한 곡의 첫페이지로
+    LaunchedEffect(jumpTokenScore, layout.columns, totalPages) {
+        if (jumpTokenScore <= 0L) return@LaunchedEffect
+        val targetGlobal = globalFirstPageOfScore(jumpToScoreId)
+
+        readyToReport = false
+        anchorGlobal = targetGlobal
+        runCatching { pagerState.animateScrollToPage(globalToPager(anchorGlobal)) }
+        readyToReport = true
+    }
+
+    // ✅ prev/next/first/last 점프
+    LaunchedEffect(jumpTokenPage, layout.columns, totalPages) {
+        if (jumpTokenPage <= 0L) return@LaunchedEffect
+        val target = jumpToGlobalPage ?: return@LaunchedEffect
+        val safe = target.coerceIn(0, totalPages - 1)
+
+        readyToReport = false
+        anchorGlobal = safe
+        runCatching { pagerState.animateScrollToPage(globalToPager(anchorGlobal)) }
+        readyToReport = true
+    }
+
+    // ✅ (1) 회전(세로/가로) 전환 시: 현재 보고 있던 페어/단일이 유지되도록 anchorGlobal 유지
+    LaunchedEffect(layout.columns, pagerState.currentPage, readyToReport, totalPages) {
+        if (!readyToReport) return@LaunchedEffect
+
+        if (layout.columns == 1) {
+            anchorGlobal = pagerState.currentPage.coerceIn(0, totalPages - 1)
+        } else {
+            val left = pagerToGlobalLeft(pagerState.currentPage).coerceIn(0, totalPages - 1)
+            val right = (left + 1).coerceAtMost(totalPages - 1)
+            if (anchorGlobal !in left..right) anchorGlobal = left
+        }
+
+        onGlobalPageChanged(anchorGlobal)
+    }
+
+    // ✅ fling 민감도 (단일 뷰어와 동일 UX)
+    val fling = PagerDefaults.flingBehavior(
+        state = pagerState,
+        snapPositionalThreshold = 0.20f
+    )
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+
+        val targetPageWidthPx = remember(layout.columns, maxWidthPx) {
+            if (layout.columns == 2) {
+                val gapPx = with(density) { twoUpInnerGap.toPx() }
+                ((maxWidthPx - gapPx) / 2f).toInt().coerceAtLeast(1)
+            } else {
+                maxWidthPx.toInt().coerceAtLeast(1)
+            }
+        }
+
+        HorizontalPager(
             state = pagerState,
-            snapPositionalThreshold = 0.20f
-        )
+            modifier = Modifier.fillMaxSize(),
+            pageSize = PageSize.Fill,
+            contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
+            pageSpacing = pageSpacing,
+            flingBehavior = fling,
+            beyondViewportPageCount = 1
+        ) { pagerPage ->
+            if (layout.columns == 1) {
+                RenderGlobalPage(
+                    globalPage = pagerPage,
+                    requests = requests,
+                    pageCounts = pageCounts,
+                    prefix = prefix,
+                    totalPages = totalPages,
+                    holders = holders,
+                    cache = cache,
+                    targetWidthPx = targetPageWidthPx
+                )
+            } else {
+                // ✅ (4) 세트리스트 가로모드(태블릿 2-up): 전체 globalPage를 페어로
+                // 홀수 문서 끝에서 다음 문서 첫페이지가 우측에 페어로 나오는 구조를 자동으로 만족
+                val leftGlobal = pagerPage * 2
+                val rightGlobal = leftGlobal + 1
 
-        // ✅ save current global page
-        LaunchedEffect(pagerState.currentPage, layout.columns, totalPages) {
-            val global =
-                if (layout.columns == 2) pagerState.currentPage * 2 else pagerState.currentPage
-            onGlobalPageChanged(global.coerceIn(0, totalPages - 1))
-        }
-
-        val scope = rememberCoroutineScope()
-
-        // ✅ (1) 곡 점프
-        LaunchedEffect(jumpTokenScore, layout.columns, totalPages) {
-            if (jumpTokenScore <= 0L) return@LaunchedEffect
-            val id = jumpToScoreId ?: return@LaunchedEffect
-
-            val tg = globalPageForScoreFirstPage(id).coerceIn(0, totalPages - 1)
-            val tp = if (layout.columns == 2) (tg / 2) else tg
-            val safePager = tp.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
-            if (safePager != pagerState.currentPage) {
-                scope.launch { pagerState.animateScrollToPage(safePager) }
-            }
-        }
-
-        // ✅ (2) 페이지 점프(버튼)
-        LaunchedEffect(jumpTokenGlobal, layout.columns, totalPages) {
-            if (jumpTokenGlobal <= 0L) return@LaunchedEffect
-            val target = jumpToGlobalPage ?: return@LaunchedEffect
-
-            val tg = target.coerceIn(0, totalPages - 1)
-            val tp = if (layout.columns == 2) (tg / 2) else tg
-            val safePager = tp.coerceIn(0, (pagerPageCount - 1).coerceAtLeast(0))
-            if (safePager != pagerState.currentPage) {
-                scope.launch { pagerState.animateScrollToPage(safePager) }
-            }
-        }
-
-        BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-            val density = LocalDensity.current
-            val maxWidthPx = with(density) { maxWidth.toPx() }
-
-            val targetPageWidthPx = remember(layout.columns, maxWidthPx) {
-                if (layout.columns == 2) {
-                    val gapPx = with(density) { twoUpInnerGap.toPx() }
-                    ((maxWidthPx - gapPx) / 2f).toInt().coerceAtLeast(1)
-                } else {
-                    maxWidthPx.toInt().coerceAtLeast(1)
-                }
-            }
-
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                pageSize = PageSize.Fill,
-                contentPadding = PaddingValues(horizontal = sidePadding, vertical = 12.dp),
-                pageSpacing = pageSpacing,
-                flingBehavior = fling,
-                beyondViewportPageCount = 1
-            ) { pagerPage ->
-                // ✅ pagerPage -> globalLeft
-                val globalLeft = if (layout.columns == 2) (pagerPage * 2) else pagerPage
-
-                if (layout.columns == 1) {
-                    // 1-up: globalLeft만 렌더링
-                    val fileIdx = findFileIndexByGlobalPage(globalLeft)
-                    val local = localPageOf(globalLeft, fileIdx)
-
-                    val req = requests[fileIdx]
-                    val holder = holders[req.filePath] ?: return@HorizontalPager
-                    val fileKey = remember(req.filePath) { req.filePath.hashCode().toString() }
-                    val loader = remember(req.filePath) {
-                        PdfPageLoader(holder = holder, cache = cache, fileKey = fileKey)
-                    }
-
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        SetlistPageImage(
-                            fileKey = fileKey,
-                            pageIndex = local,
-                            targetWidthPx = targetPageWidthPx,
-                            loader = loader
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        RenderGlobalPage(
+                            globalPage = leftGlobal,
+                            requests = requests,
+                            pageCounts = pageCounts,
+                            prefix = prefix,
+                            totalPages = totalPages,
+                            holders = holders,
+                            cache = cache,
+                            targetWidthPx = targetPageWidthPx
                         )
                     }
-                } else {
-                    // ✅ 2-up: 오른쪽은 globalRight로 "전체 세트" 기준 매핑 (규약 #6)
-                    val globalRight = globalLeft + 1
-
-                    // left
-                    val fileIdxL = findFileIndexByGlobalPage(globalLeft)
-                    val localL = localPageOf(globalLeft, fileIdxL)
-                    val reqL = requests[fileIdxL]
-                    val holderL = holders[reqL.filePath] ?: return@HorizontalPager
-                    val fileKeyL = remember(reqL.filePath) { reqL.filePath.hashCode().toString() }
-                    val loaderL = remember(reqL.filePath) {
-                        PdfPageLoader(holder = holderL, cache = cache, fileKey = fileKeyL)
-                    }
-
-                    // right (might be next document)
-                    val canShowRight = globalRight < totalPages
-                    val fileIdxR = if (canShowRight) findFileIndexByGlobalPage(globalRight) else -1
-                    val localR = if (canShowRight) localPageOf(globalRight, fileIdxR) else 0
-                    val reqR = if (canShowRight) requests[fileIdxR] else null
-                    val holderR = if (canShowRight && reqR != null) holders[reqR.filePath] else null
-                    val fileKeyR = if (canShowRight && reqR != null) remember(reqR.filePath) { reqR.filePath.hashCode().toString() } else ""
-                    val loaderR = if (canShowRight && reqR != null && holderR != null) {
-                        remember(reqR.filePath) { PdfPageLoader(holder = holderR, cache = cache, fileKey = fileKeyR) }
-                    } else null
-
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(twoUpInnerGap),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            SetlistPageImage(
-                                fileKey = fileKeyL,
-                                pageIndex = localL,
-                                targetWidthPx = targetPageWidthPx,
-                                loader = loaderL
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        if (rightGlobal < totalPages) {
+                            RenderGlobalPage(
+                                globalPage = rightGlobal,
+                                requests = requests,
+                                pageCounts = pageCounts,
+                                prefix = prefix,
+                                totalPages = totalPages,
+                                holders = holders,
+                                cache = cache,
+                                targetWidthPx = targetPageWidthPx
                             )
-                        }
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            if (canShowRight && loaderR != null && reqR != null) {
-                                SetlistPageImage(
-                                    fileKey = fileKeyR,
-                                    pageIndex = localR,
-                                    targetWidthPx = targetPageWidthPx,
-                                    loader = loaderR
-                                )
-                            } else {
-                                Spacer(Modifier.fillMaxSize())
-                            }
+                        } else {
+                            Spacer(Modifier.fillMaxSize())
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RenderGlobalPage(
+    globalPage: Int,
+    requests: List<ViewerOpenRequest>,
+    pageCounts: List<Int>,
+    prefix: IntArray,
+    totalPages: Int,
+    holders: Map<String, AndroidPdfRendererHolder>,
+    cache: PdfBitmapCache,
+    targetWidthPx: Int
+) {
+    if (totalPages <= 0) return
+    val safe = globalPage.coerceIn(0, totalPages - 1)
+
+    // global -> file index
+    var fileIdx = 0
+    for (i in 0 until pageCounts.size) {
+        if (safe < prefix[i + 1]) { fileIdx = i; break }
+    }
+    val local = (safe - prefix[fileIdx]).coerceAtLeast(0)
+
+    val req = requests[fileIdx]
+    val holder = holders[req.filePath] ?: return
+
+    val fileKey = remember(req.filePath) { req.filePath.hashCode().toString() }
+    val loader = remember(req.filePath) { PdfPageLoader(holder = holder, cache = cache, fileKey = fileKey) }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        SetlistPageImage(
+            fileKey = fileKey,
+            pageIndex = local,
+            targetWidthPx = targetWidthPx,
+            loader = loader
+        )
     }
 }
 
@@ -288,14 +307,11 @@ private fun SetlistPageImage(
 ) {
     var bitmap by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Bitmap?>(null) }
     var error by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf<Throwable?>(null) }
-
     var retryTick by remember(fileKey, pageIndex, targetWidthPx) { mutableIntStateOf(0) }
-    var isLoading by remember(fileKey, pageIndex, targetWidthPx) { mutableStateOf(false) }
 
     LaunchedEffect(fileKey, pageIndex, targetWidthPx, retryTick) {
         bitmap = null
         error = null
-        isLoading = true
 
         fun log(t: Throwable, attempt: Int) {
             Log.w(
@@ -306,23 +322,18 @@ private fun SetlistPageImage(
             )
         }
 
-        try {
-            repeat(2) { attempt0 ->
-                val attempt = attempt0 + 1
-                try {
-                    val bmp = loader.loadPage(pageIndex, targetWidthPx)
-                    bitmap = bmp
-                    error = null
-                    return@LaunchedEffect
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (t: Throwable) {
-                    log(t, attempt)
-                    if (attempt0 == 0) delay(80) else error = t
-                }
+        repeat(2) { attempt0 ->
+            val attempt = attempt0 + 1
+            try {
+                bitmap = loader.loadPage(pageIndex, targetWidthPx)
+                error = null
+                return@LaunchedEffect
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                log(t, attempt)
+                if (attempt0 == 0) delay(80) else error = t
             }
-        } finally {
-            isLoading = false
         }
     }
 
@@ -346,12 +357,6 @@ private fun SetlistPageImage(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text("페이지 로딩 실패", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "page=${pageIndex + 1} / width=$targetWidthPx",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Spacer(Modifier.height(10.dp))
                 TextButton(onClick = { retryTick++ }) { Text("다시 시도") }
             }
@@ -363,9 +368,7 @@ private fun SetlistPageImage(
                     .fillMaxWidth()
                     .height(240.dp),
                 contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
+            ) { CircularProgressIndicator() }
         }
     }
 }

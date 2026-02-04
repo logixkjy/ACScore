@@ -105,7 +105,7 @@ fun LibraryScreen(
         topBar = {
             if (isPickMode) {
                 TopAppBar(
-                    title = { Text("세트리스트 편집") },
+                    title = { Text("곡목록 편집") },
                     navigationIcon = {
                         IconButton(onClick = { onCancelPick?.invoke() }) {
                             Icon(Icons.Default.Close, contentDescription = "Cancel")
@@ -122,12 +122,12 @@ fun LibraryScreen(
                 )
             } else {
                 TopAppBar(
-                    title = { Text("ACScore Library") },
+                    title = { Text("전체 악보") },
                     actions = {
                         TextButton(
                             enabled = !isImporting,
                             onClick = { picker.launch(arrayOf("application/pdf")) }
-                        ) { Text("Import") }
+                        ) { Text("악보추가") }
                     }
                 )
             }
@@ -157,7 +157,7 @@ fun LibraryScreen(
 
             if (isPickMode) {
                 Text(
-                    text = "체크된 곡만 세트리스트에 포함돼요.",
+                    text = "체크된 곡만 곡목록애 포함돼요.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

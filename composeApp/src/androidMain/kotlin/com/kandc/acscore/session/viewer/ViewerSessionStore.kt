@@ -1,6 +1,5 @@
 package com.kandc.acscore.session.viewer
 
-import android.util.Log
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,32 +13,26 @@ data class ViewerTabState(
     val request: ViewerOpenRequest,
     val lastPage: Int = 0,
 
-    // ✅ 탭 표시용 제목 (단일: 곡명, 세트리스트: 세트리스트명)
     val tabTitle: String = request.title,
 
-    // ✅ setlist 모드면 채워짐
     val setlistId: String? = null,
     val setlistRequests: List<ViewerOpenRequest>? = null,
 
-    // ✅ 이미 열린 세트리스트 탭 점프 트리거
+    // ✅ 세트리스트: "곡 선택 점프" 전용
     val jumpToScoreId: String? = null,
-    val jumpToken: Long = 0L,
+    val jumpTokenScore: Long = 0L,
 
-    // ✅ "페이지 번호로 점프" (단일/세트리스트 공통)
+    // ✅ 공통: "페이지 점프" 전용 (prev/next/first/last)
     val jumpToGlobalPage: Int? = null,
+    val jumpTokenPage: Long = 0L,
 
-    // ✅ (참고용) 이 탭이 "처음 열릴 때" 어떤 picker에서 왔는지
-    // 규약 #8 때문에 실제 이동은 state.lastPicker만 사용하도록 추천
+    // ✅ 이 탭에서 목록 버튼 눌렀을 때 돌아갈 오버레이
     val returnPicker: ViewerPickerContext = ViewerPickerContext.library(),
 )
 
 data class ViewerSessionState(
-    // ✅ 규약 #7: 탭 순서는 고정(생성 순서 유지), 활성화한다고 재정렬하지 않는다.
     val tabs: List<ViewerTabState> = emptyList(),
     val activeTabId: String? = null,
-
-    // ✅ 규약 #8: "목록 버튼"은 항상 이 lastPicker로 이동
-    // ✅ 이 값은 setLastPicker()로만 업데이트되도록 강제
     val lastPicker: ViewerPickerContext = ViewerPickerContext.library()
 )
 
@@ -49,21 +42,10 @@ class ViewerSessionStore(
     private val _state = MutableStateFlow(ViewerSessionState())
     val state: StateFlow<ViewerSessionState> = _state.asStateFlow()
 
-    private fun activeTabOf(s: ViewerSessionState): ViewerTabState? {
-        return s.tabs.firstOrNull { it.tabId == s.activeTabId } ?: s.tabs.firstOrNull()
-    }
-
-    /**
-     * ✅ 규약 #8: lastPicker는 "목록 화면에서 사용자가 실제로 보고 있는 화면"이 바뀔 때만 갱신
-     * - 예: Library(단일 목록) / SetlistDetail(특정 세트 상세)
-     */
     fun setLastPicker(ctx: ViewerPickerContext) {
-        _state.update { s -> s.copy(lastPicker = ctx) }
+        _state.update { it.copy(lastPicker = ctx) }
     }
 
-    /**
-     * ✅ 규약 #7: 탭 활성화는 순서 변경 없이 activeTabId만 변경
-     */
     fun setActive(tabId: String) {
         _state.update { s ->
             if (s.tabs.none { it.tabId == tabId }) return@update s
@@ -71,10 +53,6 @@ class ViewerSessionStore(
         }
     }
 
-    /**
-     * ✅ 규약 #7: 닫아도 탭 순서 재정렬 X
-     * ✅ 규약 #8: closeTab이 lastPicker를 건드리지 않도록 함
-     */
     fun closeTab(tabId: String) {
         val closing = _state.value.tabs.firstOrNull { it.tabId == tabId }
         val closingFilePath = closing?.request?.filePath
@@ -106,68 +84,26 @@ class ViewerSessionStore(
 
     fun updateLastPage(tabId: String, lastPage: Int) {
         _state.update { s ->
-            val updated = s.tabs.map { t ->
-                if (t.tabId == tabId) t.copy(lastPage = lastPage.coerceAtLeast(0)) else t
-            }
-            s.copy(tabs = updated)
-        }
-    }
-
-    /**
-     * ✅ 버튼/외부 이벤트로 페이지 점프 요청
-     * - 탭의 lastPage를 즉시 바꾸지 말고(렌더 완료 후 onGlobalPageChanged에서 저장)
-     * - 점프 트리거만 세팅
-     */
-    fun requestJump(tabId: String, targetGlobalPage: Int) {
-        val token = System.currentTimeMillis()
-        _state.update { s ->
-            val updated = s.tabs.map { t ->
-                if (t.tabId == tabId) {
-                    t.copy(
-                        jumpToGlobalPage = targetGlobalPage.coerceAtLeast(0),
-                        // 단일 jumpToken 필드를 "global 점프 토큰"으로도 활용
-                        jumpToken = token
-                    )
-                } else t
-            }
-            s.copy(tabs = updated)
+            s.copy(
+                tabs = s.tabs.map { t ->
+                    if (t.tabId == tabId) t.copy(lastPage = lastPage.coerceAtLeast(0)) else t
+                }
+            )
         }
     }
 
     // -------------------------
     // Single open
     // -------------------------
-
-    /**
-     * ✅ sourcePicker를 넘긴 경우에만 lastPicker/returnPicker 갱신
-     * - Picker 화면에서 열 때: sourcePicker 넘김(= lastPicker 갱신)
-     * - Viewer 내부에서 열 때: null (lastPicker 유지)
-     */
-    fun openOrActivate(
-        request: ViewerOpenRequest,
-        sourcePicker: ViewerPickerContext? = null
-    ) {
+    fun openOrActivate(request: ViewerOpenRequest) {
         _state.update { s ->
             val existing = s.tabs.firstOrNull {
                 it.setlistRequests == null && it.request.filePath == request.filePath
             }
-            if (existing != null) {
-                // ✅ 순서 재정렬 X, activeTabId만 변경
-                val newTabs = if (sourcePicker != null) {
-                    s.tabs.map { t ->
-                        if (t.tabId == existing.tabId) t.copy(returnPicker = sourcePicker) else t
-                    }
-                } else {
-                    s.tabs
-                }
 
-                s.copy(
-                    tabs = newTabs,
-                    activeTabId = existing.tabId,
-                    lastPicker = sourcePicker ?: s.lastPicker
-                )
+            if (existing != null) {
+                s.copy(activeTabId = existing.tabId, lastPicker = existing.returnPicker)
             } else {
-                val rp = sourcePicker ?: ViewerPickerContext.library()
                 val newTab = ViewerTabState(
                     tabId = UUID.randomUUID().toString(),
                     request = request,
@@ -175,144 +111,94 @@ class ViewerSessionStore(
                     tabTitle = request.title,
                     setlistId = null,
                     setlistRequests = null,
-                    returnPicker = rp
+                    returnPicker = ViewerPickerContext.library()
                 )
-
                 s.copy(
-                    tabs = s.tabs + newTab, // ✅ 생성 순서 유지(뒤에 추가)
+                    tabs = s.tabs + newTab,
                     activeTabId = newTab.tabId,
-                    lastPicker = sourcePicker ?: s.lastPicker
+                    lastPicker = newTab.returnPicker
                 )
             }
         }
     }
 
-    /**
-     * ✅ 여러 개 단일 탭 열기(중복 제거)
-     * ✅ lastPicker는 sourcePicker가 있을 때만 갱신
-     * ✅ 순서 재정렬 X
-     */
-    fun openMany(
-        requests: List<ViewerOpenRequest>,
-        initialActiveIndex: Int = 0,
-        sourcePicker: ViewerPickerContext? = null
-    ) {
-        if (requests.isEmpty()) return
-
-        _state.update { s ->
-            val existingByPath = s.tabs
-                .filter { it.setlistRequests == null }
-                .associateBy { it.request.filePath }
-
-            val targetReq = requests.getOrNull(initialActiveIndex)
-            val alreadyTargetTab = targetReq?.let { existingByPath[it.filePath] }
-
-            val newOnes = requests.filter { it.filePath !in existingByPath }
-
-            if (newOnes.isEmpty()) {
-                if (alreadyTargetTab != null) {
-                    val newTabs = if (sourcePicker != null) {
-                        s.tabs.map { t ->
-                            if (t.tabId == alreadyTargetTab.tabId) t.copy(returnPicker = sourcePicker) else t
-                        }
-                    } else s.tabs
-
-                    return@update s.copy(
-                        tabs = newTabs,
-                        activeTabId = alreadyTargetTab.tabId,
-                        lastPicker = sourcePicker ?: s.lastPicker
-                    )
-                }
-                return@update s
-            }
-
-            val rp = sourcePicker ?: ViewerPickerContext.library()
-            val newTabs = newOnes.map { req ->
-                ViewerTabState(
-                    tabId = UUID.randomUUID().toString(),
-                    request = req,
-                    lastPage = 0,
-                    tabTitle = req.title,
-                    returnPicker = rp
-                )
-            }
-
-            val merged = s.tabs + newTabs
-
-            val activeTabId =
-                when {
-                    alreadyTargetTab != null -> alreadyTargetTab.tabId
-                    targetReq != null -> merged.lastOrNull { it.setlistRequests == null && it.request.filePath == targetReq.filePath }?.tabId
-                        ?: newTabs.first().tabId
-                    else -> newTabs.first().tabId
-                }
-
-            s.copy(
-                tabs = merged,
-                activeTabId = activeTabId,
-                lastPicker = sourcePicker ?: s.lastPicker
-            )
-        }
-    }
-
-    /**
-     * ✅ 세트리스트 탭 열기
-     * ✅ sourcePicker 있을 때만 lastPicker 갱신
-     * ✅ 순서 재정렬 X
-     */
     fun openSetlist(
         setlistId: String,
         setlistTitle: String,
         requests: List<ViewerOpenRequest>,
-        initialScoreId: String? = null,
-        sourcePicker: ViewerPickerContext? = null
+        initialScoreId: String? = null
     ) {
         if (requests.isEmpty()) return
 
         _state.update { s ->
-            // 이미 열린 동일 setlist 탭이 있으면 활성만
             val existing = s.tabs.firstOrNull { it.setlistId == setlistId && it.setlistRequests != null }
-            if (existing != null) {
-                val newTabs = if (sourcePicker != null) {
-                    s.tabs.map { t ->
-                        if (t.tabId == existing.tabId) t.copy(returnPicker = sourcePicker) else t
-                    }
-                } else s.tabs
 
-                return@update s.copy(
-                    tabs = newTabs,
+            val startIndex = initialScoreId?.let { id ->
+                requests.indexOfFirst { it.scoreId == id }.takeIf { it >= 0 }
+            } ?: 0
+
+            val picker = ViewerPickerContext.setlistDetail(setlistId)
+            val selectedScoreId = requests[startIndex].scoreId
+
+            if (existing != null) {
+                s.copy(
+                    tabs = s.tabs.map { t ->
+                        if (t.tabId != existing.tabId) t
+                        else t.copy(
+                            request = requests[startIndex],
+                            tabTitle = setlistTitle,
+                            setlistId = setlistId,
+                            setlistRequests = requests,
+                            returnPicker = picker,
+                            jumpToScoreId = selectedScoreId,
+                            jumpTokenScore = t.jumpTokenScore + 1
+                        )
+                    },
                     activeTabId = existing.tabId,
-                    lastPicker = sourcePicker ?: s.lastPicker
+                    lastPicker = picker
+                )
+            } else {
+                val newTab = ViewerTabState(
+                    tabId = UUID.randomUUID().toString(),
+                    request = requests[startIndex],
+                    lastPage = 0,
+                    tabTitle = setlistTitle,
+                    setlistId = setlistId,
+                    setlistRequests = requests,
+                    returnPicker = picker,
+                    jumpToScoreId = selectedScoreId,
+                    jumpTokenScore = 1L
+                )
+                s.copy(
+                    tabs = s.tabs + newTab,
+                    activeTabId = newTab.tabId,
+                    lastPicker = picker
                 )
             }
+        }
+    }
 
-            val startIndex =
-                initialScoreId?.let { id -> requests.indexOfFirst { it.scoreId == id } }?.takeIf { it >= 0 }
-                    ?: 0
-
-            val rp = sourcePicker ?: ViewerPickerContext.library()
-            val newTab = ViewerTabState(
-                tabId = UUID.randomUUID().toString(),
-                request = requests[startIndex],
-                lastPage = 0,
-                tabTitle = setlistTitle,
-                setlistId = setlistId,
-                setlistRequests = requests,
-                jumpToScoreId = requests[startIndex].scoreId,
-                jumpToken = 1L,
-                returnPicker = rp
-            )
-
+    // ✅ prev/next/first/last 버튼용 점프
+    fun requestJump(tabId: String, targetGlobalPage: Int) {
+        _state.update { s ->
             s.copy(
-                tabs = s.tabs + newTab,
-                activeTabId = newTab.tabId,
-                lastPicker = sourcePicker ?: s.lastPicker
+                tabs = s.tabs.map { t ->
+                    if (t.tabId != tabId) t
+                    else {
+                        val safe = targetGlobalPage.coerceAtLeast(0)
+                        t.copy(
+                            lastPage = safe,
+                            jumpToGlobalPage = safe,
+                            jumpTokenPage = t.jumpTokenPage + 1
+                        )
+                    }
+                }
             )
         }
     }
 
     // -------------------------
-    // Persistence
+    // Persistence (기존 Snapshot 유지)
     // -------------------------
     fun toSnapshot(): ViewerSessionSnapshot {
         val st = _state.value
@@ -324,27 +210,27 @@ class ViewerSessionStore(
                     title = tab.tabTitle,
                     filePath = tab.request.filePath,
                     lastPage = tab.lastPage,
+                    tabTitle = tab.tabTitle,
                     setlistId = tab.setlistId,
                     setlist = tab.setlistRequests?.map { r ->
-                        ViewerSessionSnapshot.RequestSnapshot(
-                            scoreId = r.scoreId,
-                            title = r.title,
-                            filePath = r.filePath
-                        )
-                    }
+                        ViewerSessionSnapshot.RequestSnapshot(r.scoreId, r.title, r.filePath)
+                    },
+                    picker = tab.returnPicker.toSnapshot()
                 )
             },
-            activeTabId = st.activeTabId
+            activeTabId = st.activeTabId,
+            lastPicker = st.lastPicker.toSnapshot()
         )
     }
 
     fun restoreFromSnapshot(snapshot: ViewerSessionSnapshot) {
         val restoredTabs: List<ViewerTabState> = snapshot.tabs.mapNotNull { tab ->
             val isSetlist = !tab.setlist.isNullOrEmpty()
+            val picker = tab.picker?.toPickerContext() ?: ViewerPickerContext.library()
 
             if (isSetlist) {
                 val reqs = tab.setlist!!.map { r ->
-                    ViewerOpenRequest(scoreId = r.scoreId, title = r.title, filePath = r.filePath)
+                    ViewerOpenRequest(r.scoreId, r.title, r.filePath)
                 }.filter { File(it.filePath).exists() }
 
                 if (reqs.isEmpty()) return@mapNotNull null
@@ -355,27 +241,32 @@ class ViewerSessionStore(
                         ?: reqs.first()
 
                 ViewerTabState(
-                    tabId = tab.tabId ?: UUID.randomUUID().toString(),
+                    tabId = tab.tabId,
                     request = currentReq,
                     lastPage = tab.lastPage.coerceAtLeast(0),
-                    tabTitle = tab.title ?: currentReq.title,
+                    tabTitle = tab.tabTitle ?: tab.title,
                     setlistId = tab.setlistId,
                     setlistRequests = reqs,
+                    returnPicker = picker,
                     jumpToScoreId = null,
-                    jumpToken = 0L,
-                    returnPicker = ViewerPickerContext.library()
+                    jumpTokenScore = 0L,
+                    jumpToGlobalPage = null,
+                    jumpTokenPage = 0L
                 )
             } else {
+                if (!File(tab.filePath).exists()) return@mapNotNull null
                 ViewerTabState(
-                    tabId = tab.tabId ?: UUID.randomUUID().toString(),
+                    tabId = tab.tabId,
                     request = ViewerOpenRequest(tab.scoreId, tab.title, tab.filePath),
                     lastPage = tab.lastPage.coerceAtLeast(0),
-                    tabTitle = tab.title,
+                    tabTitle = tab.tabTitle ?: tab.title,
                     setlistId = null,
                     setlistRequests = null,
+                    returnPicker = picker,
                     jumpToScoreId = null,
-                    jumpToken = 0L,
-                    returnPicker = ViewerPickerContext.library()
+                    jumpTokenScore = 0L,
+                    jumpToGlobalPage = null,
+                    jumpTokenPage = 0L
                 )
             }
         }
@@ -384,12 +275,84 @@ class ViewerSessionStore(
             snapshot.activeTabId?.takeIf { id -> restoredTabs.any { it.tabId == id } }
                 ?: restoredTabs.firstOrNull()?.tabId
 
-        // ✅ 순서 유지(복원된 순서 그대로)
         _state.value = ViewerSessionState(
             tabs = restoredTabs,
             activeTabId = active,
-            // lastPicker는 복원 데이터에 없으니 기본값 유지
-            lastPicker = ViewerPickerContext.library()
+            lastPicker = snapshot.lastPicker?.toPickerContext()
+                ?: restoredTabs.firstOrNull { it.tabId == active }?.returnPicker
+                ?: ViewerPickerContext.library()
         )
+    }
+
+    private fun ViewerPickerContext.toSnapshot(): ViewerSessionSnapshot.PickerSnapshot =
+        when (kind) {
+            ViewerPickerContext.Kind.Library ->
+                ViewerSessionSnapshot.PickerSnapshot(kind = "library", setlistId = null)
+
+            ViewerPickerContext.Kind.SetlistDetail ->
+                ViewerSessionSnapshot.PickerSnapshot(kind = "setlistDetail", setlistId = setlistId)
+
+            // 혹시 Kind.Setlists가 있어도 Snapshot은 library/detail만 쓰므로 library로 처리
+            else ->
+                ViewerSessionSnapshot.PickerSnapshot(kind = "library", setlistId = null)
+        }
+
+    private fun ViewerSessionSnapshot.PickerSnapshot.toPickerContext(): ViewerPickerContext =
+        when (kind) {
+            "setlistDetail" -> ViewerPickerContext.setlistDetail(setlistId ?: return ViewerPickerContext.library())
+            else -> ViewerPickerContext.library()
+        }
+
+    // ✅ 기존 호출부 호환용: openMany(requests, initialIndex:Int)
+    fun openMany(
+        requests: List<ViewerOpenRequest>,
+        initialIndex: Int
+    ) {
+        if (requests.isEmpty()) return
+
+        val picker = _state.value.lastPicker
+
+        _state.update { s ->
+            val tabs = s.tabs.toMutableList()
+            var lastTouchedTabId: String? = s.activeTabId
+
+            // 1) 요청들 전부 탭으로 열기(중복은 재사용)
+            val openedTabIdsInOrder = mutableListOf<String>()
+
+            requests.forEach { req ->
+                val existing = tabs.firstOrNull {
+                    it.setlistRequests == null && it.request.filePath == req.filePath
+                }
+
+                val tabId = if (existing != null) {
+                    existing.tabId
+                } else {
+                    val newTab = ViewerTabState(
+                        tabId = UUID.randomUUID().toString(),
+                        request = req,
+                        lastPage = 0,
+                        tabTitle = req.title,
+                        setlistId = null,
+                        setlistRequests = null,
+                        returnPicker = picker
+                    )
+                    tabs.add(newTab)
+                    newTab.tabId
+                }
+
+                openedTabIdsInOrder.add(tabId)
+                lastTouchedTabId = tabId
+            }
+
+            // 2) initialIndex에 해당하는 탭을 active로
+            val clamped = initialIndex.coerceIn(0, openedTabIdsInOrder.lastIndex)
+            val activeId = openedTabIdsInOrder.getOrNull(clamped) ?: lastTouchedTabId
+
+            s.copy(
+                tabs = tabs,
+                activeTabId = activeId,
+                lastPicker = picker
+            )
+        }
     }
 }

@@ -4,9 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.List
@@ -39,11 +39,16 @@ fun TabbedViewerScreen(
     }
 
     val layout = rememberViewerLayout()
+
+    // ✅ 태블릿 가로(2-up)일 때만 2페이지 단위로 이동, 그 외 1페이지
     val step = if (layout.columns == 2) 2 else 1
 
     var controlsVisible by remember { mutableStateOf(false) }
+
+    // ✅ 단일: PDF 페이지수 / 세트: totalPages
     var pageCount by remember(state.activeTabId) { mutableStateOf<Int?>(null) }
 
+    // ✅ 컨트롤 노출 시 자동 숨김
     LaunchedEffect(controlsVisible, state.activeTabId) {
         if (!controlsVisible) return@LaunchedEffect
         delay(5_000)
@@ -71,51 +76,69 @@ fun TabbedViewerScreen(
                 detectTapGestures(onTap = { controlsVisible = !controlsVisible })
             }
     ) {
-        // 1) Viewer
+        // ---------------------------------------------------------------------
+        // 1) Viewer (맨 아래 레이어)
+        // ---------------------------------------------------------------------
         val setlistReqs = active.setlistRequests
         if (setlistReqs != null) {
             val latestTabId by rememberUpdatedState(active.tabId)
 
             SetlistPdfViewerScreen(
                 requests = setlistReqs,
+                initialScoreId = active.request.scoreId,
                 modifier = Modifier.fillMaxSize(),
-                currentGlobalPage = active.lastPage,
+                initialGlobalPage = active.lastPage,
                 onGlobalPageChanged = { page -> sessionStore.updateLastPage(latestTabId, page) },
-                onPageCountReady = { count -> pageCount = count },
+                onPageCountReady = { total -> pageCount = total },
+
+                // ✅ 곡 선택 점프(세트 상세 목록)
                 jumpToScoreId = active.jumpToScoreId,
-                jumpTokenScore = active.jumpToken,
+                jumpTokenScore = active.jumpTokenScore,
+
+                // ✅ 페이지 점프(이전/다음/처음/마지막)
                 jumpToGlobalPage = active.jumpToGlobalPage,
-                jumpTokenGlobal = active.jumpToken
+                jumpTokenPage = active.jumpTokenPage
             )
         } else {
             PdfViewerScreen(
                 request = active.request,
                 modifier = Modifier.fillMaxSize(),
-                currentGlobalPage = active.lastPage,
-                onGlobalPageChanged = { page -> sessionStore.updateLastPage(active.tabId, page) },
+                initialPage = active.lastPage,
+                onPageChanged = { page -> sessionStore.updateLastPage(active.tabId, page) },
                 onPageCountReady = { count -> pageCount = count },
                 jumpToGlobalPage = active.jumpToGlobalPage,
-                jumpToken = active.jumpToken
+                jumpToken = active.jumpTokenPage
             )
         }
 
-        // 2) Transparent controls
+        // ---------------------------------------------------------------------
+        // 2) Transparent controls (컨트롤 노출 중엔 비활성)
+        // ---------------------------------------------------------------------
         ViewerTransparentControlsOverlay(
             enabled = !controlsVisible,
+
+            // ✅ 스펙: “현재 보고있는 파일이 속한 목록”이 아니라 “마지막으로 보고 있던 목록”을 연다
             onLibrary = { onRequestOpenPicker(state.lastPicker) },
+
             onPrev = {
                 val max = (pageCount ?: Int.MAX_VALUE) - 1
-                val target = (active.lastPage - step).coerceAtLeast(0).coerceAtMost(max.coerceAtLeast(0))
+                val target = (active.lastPage - step)
+                    .coerceAtLeast(0)
+                    .coerceAtMost(max.coerceAtLeast(0))
                 sessionStore.requestJump(active.tabId, target)
             },
             onNext = {
                 val max = (pageCount ?: Int.MAX_VALUE) - 1
-                val target = (active.lastPage + step).coerceAtLeast(0).coerceAtMost(max.coerceAtLeast(0))
+                val target = (active.lastPage + step)
+                    .coerceAtLeast(0)
+                    .coerceAtMost(max.coerceAtLeast(0))
                 sessionStore.requestJump(active.tabId, target)
             },
-            onFirst = { sessionStore.requestJump(active.tabId, 0) },
+            onFirst = {
+                sessionStore.requestJump(active.tabId, 0)
+            },
             onLast = {
-                val lastIndex = (pageCount ?: 1) - 1
+                val lastIndex = ((pageCount ?: return@ViewerTransparentControlsOverlay) - 1)
                 if (lastIndex >= 0) sessionStore.requestJump(active.tabId, lastIndex)
             }
         )
@@ -125,7 +148,9 @@ fun TabbedViewerScreen(
             pageCount = pageCount
         )
 
-        // ✅ 전체 dim (원하면 유지)
+        // ---------------------------------------------------------------------
+        // 3) Dim layer (컨트롤 표시 중: 전체 딤 + 터치하면 hide)
+        // ---------------------------------------------------------------------
         if (controlsVisible) {
             Box(
                 modifier = Modifier
@@ -135,13 +160,13 @@ fun TabbedViewerScreen(
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
-                    ) {
-                        controlsVisible = false
-                    }
+                    ) { controlsVisible = false }
             )
         }
 
-        // 4) Nav + Tabs overlay
+        // ---------------------------------------------------------------------
+        // 4) Nav + Tabs overlay (최상단)
+        // ---------------------------------------------------------------------
         if (controlsVisible) {
             Column(
                 modifier = Modifier
@@ -157,43 +182,31 @@ fun TabbedViewerScreen(
                         .padding(top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // < + (아이콘 위 / 텍스트 아래) 목록 버튼
                     Surface(
                         shape = MaterialTheme.shapes.large,
                         tonalElevation = 1.dp,
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.80f),
-                        modifier = Modifier
-                            .clickable(
-                                indication = null,
-                                interactionSource = remember { MutableInteractionSource() }
-                            ) {
-                                onRequestOpenPicker(state.lastPicker)
-                                controlsVisible = false
-                            }
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) {
+                            onRequestOpenPicker(state.lastPicker)
+                            controlsVisible = false
+                        }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // ✅ 왼쪽: 뒤로 화살표
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = null,
                                 modifier = Modifier.padding(end = 10.dp)
                             )
-
-                            // ✅ 오른쪽: 아이콘 + 텍스트 (위/아래)
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.List,
-                                    contentDescription = null
-                                )
-//                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "목록",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(imageVector = Icons.Filled.List, contentDescription = null)
+                                Text(text = "목록", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -207,8 +220,6 @@ fun TabbedViewerScreen(
                     )
 
                     Spacer(Modifier.weight(1f))
-
-                    // ✅ Hide 버튼 삭제 (요구사항)
                 }
 
                 Row(
