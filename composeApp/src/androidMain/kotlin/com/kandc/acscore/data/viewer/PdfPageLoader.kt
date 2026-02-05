@@ -13,8 +13,7 @@ class PdfPageLoader(
         val key = "$fileKey:$pageIndex:$targetWidthPx"
 
         cache.get(key)?.let { cached ->
-            if (!cached.isRecycled) return cached
-            cache.remove(key)
+            return cached
         }
 
         return withContext(Dispatchers.IO) {

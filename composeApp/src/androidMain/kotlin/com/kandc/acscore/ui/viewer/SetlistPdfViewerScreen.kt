@@ -51,6 +51,12 @@ fun SetlistPdfViewerScreen(
     val twoUpInnerGap = 12.dp
 
     val cache = remember { PdfBitmapCache.default() }
+    DisposableEffect(Unit) {
+        onDispose {
+            // recycle은 없으니 안전
+            runCatching { cache.clear() }
+        }
+    }
 
     val holders = remember(requests) {
         requests.associate { r -> r.filePath to AndroidPdfRendererHolder(r.filePath) }

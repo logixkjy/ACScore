@@ -45,6 +45,9 @@ fun LibraryScreen(
 
     // ✅ pick 상태: 체크된 곡(최종 포함)
     pickedScoreIds: Set<String> = emptySet(),
+
+    // ✅ 추가
+    modifier: Modifier = Modifier,
 ) {
     val scores by vm.scores.collectAsState()
     val error by vm.error.collectAsState()
@@ -102,6 +105,7 @@ fun LibraryScreen(
     var renameText by remember { mutableStateOf("") }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             if (isPickMode) {
                 TopAppBar(
@@ -245,7 +249,13 @@ fun LibraryScreen(
                                     },
                                     trailingContent = {
                                         if (isPickMode) {
-                                            Checkbox(checked = checked, onCheckedChange = null)
+                                            Checkbox(
+                                                checked = checked,
+                                                onCheckedChange = {
+                                                    // ✅ pick 모드에서 체크박스 자체로도 토글
+                                                    onPickScore?.invoke(score.id, score.title, score.fileName)
+                                                }
+                                            )
                                         } else {
                                             Box {
                                                 IconButton(

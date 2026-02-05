@@ -18,10 +18,8 @@ class PdfBitmapCache private constructor(
             oldValue: Bitmap,
             newValue: Bitmap?
         ) {
-            // ✅ 가장 중요한 포인트
-            if (!oldValue.isRecycled) {
-                oldValue.recycle()
-            }
+            // ❌ Compose가 draw 중인 Bitmap일 수 있어서 recycle 금지
+            // if (!oldValue.isRecycled) oldValue.recycle()
         }
     }
 
@@ -65,8 +63,7 @@ class PdfBitmapCache private constructor(
 
         private fun create(): PdfBitmapCache {
             val maxMemory = Runtime.getRuntime().maxMemory().toInt()
-            // ✅ 앱 힙의 1/6 정도만 사용 (안전)
-            val cacheSize = maxMemory / 6
+            val cacheSize = maxMemory / 10
             return PdfBitmapCache(cacheSize)
         }
     }

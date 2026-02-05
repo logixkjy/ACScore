@@ -1,14 +1,32 @@
 package com.kandc.acscore.root
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.kandc.acscore.di.SetlistDi
+import com.kandc.acscore.session.viewer.ViewerPickerContext
+import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
+import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
+import com.kandc.acscore.share.AcsetImporter
 import com.kandc.acscore.ui.common.SegmentedTabs
 import com.kandc.acscore.ui.library.LibraryScreen
 import com.kandc.acscore.ui.setlist.ScorePickItem
@@ -18,11 +36,6 @@ import com.kandc.acscore.ui.viewer.TabbedViewerScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
 import java.io.File
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import com.kandc.acscore.di.SetlistDi
-import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
-import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
-import com.kandc.acscore.session.viewer.ViewerPickerContext
 
 private enum class HomeTab { Library, Setlists }
 
@@ -30,11 +43,24 @@ private enum class HomeTab { Library, Setlists }
 fun MainHostScreen(component: RootComponent) {
     val overlayOpen by component.isLibraryOverlayOpen.collectAsState()
 
+    // ✅ Importer 연결에 필요한 공용 상태들
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val importer = remember { AcsetImporter() }
+    var isImporting by remember { mutableStateOf(false) }
+
     var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Library) }
     var openedSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
 
     var pickingForSetlistId by rememberSaveable { mutableStateOf<String?>(null) }
     var pickingSelectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+// ✅ pick 모드에서 최종 순서를 보존하기 위한 리스트
+    var pickingOrderedIds by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+
+    // pick 편집용: 최초(기존) 아이디 목록(순서 유지) + 현재 드래프트 선택 Set
+    var pickOriginalIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pickDraftIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val sessionState by component.viewerSessionStore.state.collectAsState()
 
@@ -64,7 +90,75 @@ fun MainHostScreen(component: RootComponent) {
         }
     }
 
+    // ✅ 외부에서 들어온 .acset Uri 감지 → 가져오기 다이얼로그 + 실행
+    val pendingAcsetUri by component.pendingAcsetUri.collectAsState()
+    if (pendingAcsetUri != null) {
+        val uri: Uri = pendingAcsetUri!!
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!isImporting) component.consumePendingAcset()
+            },
+            title = { Text("세트리스트 가져오기") },
+            text = {
+                if (isImporting) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("가져오는 중…", textAlign = TextAlign.Center)
+                    }
+                } else {
+                    Text("공유받은 세트리스트 파일을 가져올까요?")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isImporting,
+                    onClick = {
+                        isImporting = true
+                        scope.launch {
+                            val result = importer.importFromUri(context, uri)
+
+                            isImporting = false
+                            component.consumePendingAcset()
+
+                            when (result) {
+                                is AcsetImporter.Result.Success -> {
+                                    snackbarHostState.showSnackbar(
+                                        "가져오기 완료: +${result.importedCount} (중복 ${result.skippedDuplicateCount}개 재사용)"
+                                    )
+                                    // TODO(T6-3): setlist 생성 + 상세로 이동
+                                    // result.setlistTitle / result.orderedScoreIds 활용
+                                }
+                                is AcsetImporter.Result.Failure -> {
+                                    snackbarHostState.showSnackbar(
+                                        result.reason.ifBlank { "가져오기에 실패했어요." }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                ) { Text("가져오기") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isImporting,
+                    onClick = { component.consumePendingAcset() }
+                ) { Text("취소") }
+            }
+        )
+    }
+
     Box(Modifier.fillMaxSize()) {
+        // ✅ Import 결과 알림(하단)
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+
         TabbedViewerScreen(
             sessionStore = component.viewerSessionStore,
             onRequestOpenPicker = {
@@ -87,11 +181,8 @@ fun MainHostScreen(component: RootComponent) {
 
                         if (selectedTab == HomeTab.Library) {
                             openedSetlistId = null
-
-                            // ✅ (3) 사용자가 "Library 탭"을 보고 있다 = lastPicker 갱신
                             component.viewerSessionStore.setLastPicker(ViewerPickerContext.library())
                         } else {
-                            // Setlists 탭으로 이동했지만 아직 상세는 아님
                             if (openedSetlistId == null) {
                                 component.viewerSessionStore.setLastPicker(ViewerPickerContext.setlists())
                             } else {
@@ -117,197 +208,178 @@ fun MainHostScreen(component: RootComponent) {
                         val addToSetlist = remember(setlistRepo) {
                             AddScoreToSetlistUseCase(setlistRepo)
                         }
+                        val updateItemsUseCase = remember(setlistRepo) {
+                            UpdateSetlistItemsUseCase(setlistRepo)
+                        }
 
-                        // ✅ 오버레이가 Library 화면이라면 lastPicker를 확실히 Library로
                         LaunchedEffect(Unit) {
                             component.viewerSessionStore.setLastPicker(ViewerPickerContext.library())
                         }
 
+                        val pickSetlistId = pickingForSetlistId
+                        val isPickMode = pickSetlistId != null
+
+                        val exitPick: () -> Unit = {
+                            pickingForSetlistId = null
+                            pickingSelectedIds = emptySet()   // 기존 상태도 정리 (남아있으면 누수 원인)
+                            pickOriginalIds = emptyList()
+                            pickDraftIds = emptySet()
+
+                            selectedTab = HomeTab.Setlists
+                            openedSetlistId = pickSetlistId
+                        }
+
+                        // 1) LibraryScreen의 onPickScore에서 "이미 포함된 곡" 방지 + 선택 후 Setlist로 복귀
                         LibraryScreen(
                             vm = component.libraryViewModel,
                             onOpenViewer = { scoreId, title, fileName ->
-                                // ✅ 규약 #8: 마지막 오버레이는 "Library"
                                 component.viewerSessionStore.setLastPicker(ViewerPickerContext.library())
-
                                 component.closeLibraryOverlay()
                                 val filePath = File(context.filesDir, "scores/$fileName").absolutePath
-
-                                // (기존 로직 유지)
                                 component.onScoreSelected(
                                     ViewerOpenRequest(scoreId = scoreId, title = title, filePath = filePath)
                                 )
                             },
-                            onPickScore = pickingForSetlistId?.let { targetSetlistId ->
-                                { scoreId, title, fileName ->
-                                    scope.launch {
-                                        runCatching {
-                                            addToSetlist(targetSetlistId, scoreId)
-                                        }.onSuccess {
-                                            pickingSelectedIds = pickingSelectedIds + scoreId
-                                            openedSetlistId = targetSetlistId
 
-                                            // ✅ pick 후에도 결국 사용자는 setlist detail로 돌아가니 lastPicker도 detail로
-                                            component.viewerSessionStore.setLastPicker(
-                                                ViewerPickerContext.setlistDetail(targetSetlistId)
-                                            )
-                                        }.onFailure { e ->
-                                            component.libraryViewModel.emitError(e.message ?: "세트리스트 추가 실패")
-                                        }
+                            // ✅ pick 모드: 즉시 DB 반영 X, 체크만 토글
+                            onPickScore = if (pickingForSetlistId != null) {
+                                { scoreId, _, _ ->
+                                    val isSelected = pickingSelectedIds.contains(scoreId)
+
+                                    pickingSelectedIds = if (isSelected) {
+                                        pickingSelectedIds - scoreId
+                                    } else {
+                                        pickingSelectedIds + scoreId
                                     }
+
+                                    pickingOrderedIds = if (isSelected) {
+                                        pickingOrderedIds.filterNot { it == scoreId }
+                                    } else {
+                                        pickingOrderedIds + scoreId // 새로 선택한 곡은 맨 뒤에 추가
+                                    }
+                                }
+                            } else null,
+
+                            onCancelPick = cancel@{
+                                val sid = pickingForSetlistId ?: return@cancel
+
+                                pickingForSetlistId = null
+                                pickingSelectedIds = emptySet()
+                                pickingOrderedIds = emptyList()
+
+                                // ✅ 다시 세트리스트 상세로
+                                openedSetlistId = sid
+                                selectedTab = HomeTab.Setlists
+                                component.viewerSessionStore.setLastPicker(ViewerPickerContext.setlistDetail(sid))
+                            },
+
+                            onDonePick = done@{
+                                val sid = pickingForSetlistId ?: return@done
+                                val newIds = pickingOrderedIds
+
+                                scope.launch {
+                                    runCatching { updateItemsUseCase(sid, newIds) }
+                                        .onSuccess {
+                                            pickingForSetlistId = null
+                                            pickingSelectedIds = emptySet()
+                                            pickingOrderedIds = emptyList()
+
+                                            openedSetlistId = sid
+                                            selectedTab = HomeTab.Setlists
+                                            component.viewerSessionStore.setLastPicker(ViewerPickerContext.setlistDetail(sid))
+                                        }
                                 }
                             },
-                            onCancelPick = if (pickingForSetlistId != null) {
-                                {
-                                    selectedTab = HomeTab.Setlists
-                                    openedSetlistId = pickingForSetlistId
-                                    pickingForSetlistId = null
-                                    pickingSelectedIds = emptySet()
 
-                                    // ✅ cancel도 setlist detail로 돌아감
-                                    openedSetlistId?.let {
-                                        component.viewerSessionStore.setLastPicker(
-                                            ViewerPickerContext.setlistDetail(it)
-                                        )
-                                    }
-                                }
-                            } else null,
-                            onDonePick = if (pickingForSetlistId != null) {
-                                {
-                                    selectedTab = HomeTab.Setlists
-                                    openedSetlistId = pickingForSetlistId
-                                    pickingForSetlistId = null
-                                    pickingSelectedIds = emptySet()
-
-                                    // ✅ done도 setlist detail로 돌아감
-                                    openedSetlistId?.let {
-                                        component.viewerSessionStore.setLastPicker(
-                                            ViewerPickerContext.setlistDetail(it)
-                                        )
-                                    }
-                                }
-                            } else null,
-                            pickedScoreIds = pickingSelectedIds
+                            pickedScoreIds = pickingSelectedIds,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
 
                     HomeTab.Setlists -> {
-                        val candidates = rememberLibraryCandidates(component)
+                        // ✅ Setlist 화면 진입 시 Library 목록 보장
+                        LaunchedEffect(Unit) {
+                            component.libraryViewModel.refresh()
+                        }
 
                         val context = LocalContext.current
-                        val scope = rememberCoroutineScope()
-
                         val setlistRepo = remember(context.applicationContext) {
                             SetlistDi.provideRepository(context.applicationContext)
                         }
-
-                        val updateSetlistItems = remember(setlistRepo) {
+                        val updateItemsUseCase = remember(setlistRepo) {
                             UpdateSetlistItemsUseCase(setlistRepo)
                         }
 
-                        val id = openedSetlistId
-                        if (id == null) {
-                            // ✅ Setlists 리스트 화면 = lastPicker는 Setlists
+                        if (openedSetlistId == null) {
                             LaunchedEffect(Unit) {
                                 component.viewerSessionStore.setLastPicker(ViewerPickerContext.setlists())
                             }
 
                             SetlistListScreen(
+                                modifier = Modifier.fillMaxSize(),
                                 onOpenSetlist = { setlistId ->
                                     openedSetlistId = setlistId
-
-                                    // ✅ (4) 세트 상세로 진입 = lastPicker는 SetlistDetail(setlistId)
                                     component.viewerSessionStore.setLastPicker(
                                         ViewerPickerContext.setlistDetail(setlistId)
                                     )
                                 }
                             )
                         } else {
-                            // ✅ candidates 빠르게 lookup
-                            val candidateMap = remember(candidates) { candidates.associateBy { it.scoreId } }
+                            val setlistId = openedSetlistId!!
+                            val scores by component.libraryViewModel.scores.collectAsState()
 
-                            // ✅ Setlist 상세 화면 = lastPicker는 SetlistDetail(id)
-                            LaunchedEffect(id) {
-                                component.viewerSessionStore.setLastPicker(
-                                    ViewerPickerContext.setlistDetail(id)
-                                )
-                            }
-
+                            // 2) SetlistDetailScreen 콜백 2개 채우기
                             SetlistDetailScreen(
-                                setlistId = id,
-                                libraryCandidates = candidates,
+                                setlistId = setlistId,
+                                libraryCandidates = scores.map { s ->
+                                    ScorePickItem(
+                                        scoreId = s.id,
+                                        title = s.title,
+                                        fileName = s.fileName,
+                                        filePath = File(context.filesDir, "scores/${s.fileName}").absolutePath
+                                    )
+                                },
                                 onBack = {
                                     openedSetlistId = null
-
-                                    // ✅ (5) 상세에서 뒤로 = Setlists 리스트가 마지막 화면
                                     component.viewerSessionStore.setLastPicker(ViewerPickerContext.setlists())
                                 },
-
-                                // ✅ 핵심: 세트리스트 이어보기로 열기
-                                onOpenSetlistViewer = { setlistId, setlistTitle, orderedIds, initialScoreId ->
-                                    val requests = orderedIds.mapNotNull { sid ->
-                                        val item = candidateMap[sid] ?: return@mapNotNull null
-                                        val filePath = File(context.filesDir, "scores/${item.fileName}").absolutePath
-                                        ViewerOpenRequest(
-                                            scoreId = item.scoreId,
-                                            title = item.title,
-                                            filePath = filePath
-                                        )
+                                onOpenSetlistViewer = { id, setlistTitle, orderedIds, initialScoreId ->
+                                    val scoreMap = scores.associateBy { it.id }
+                                    val requests = orderedIds.mapNotNull { scoreId ->
+                                        val s = scoreMap[scoreId] ?: return@mapNotNull null
+                                        val fp = File(context.filesDir, "scores/${s.fileName}").absolutePath
+                                        if (!File(fp).exists()) return@mapNotNull null
+                                        ViewerOpenRequest(scoreId = s.id, title = s.title, filePath = fp)
                                     }
 
-                                    // ✅ 규약 #8: 마지막 오버레이는 이 setlist detail
-                                    val ctx = ViewerPickerContext.setlistDetail(setlistId)
-                                    component.viewerSessionStore.setLastPicker(ctx)
-
-                                    component.closeLibraryOverlay()
-
-                                    // ✅ (6) openSetlist에도 sourcePicker를 넘겨두면 탭 returnPicker도 일관됨
                                     component.viewerSessionStore.openSetlist(
-                                        setlistId = setlistId,
+                                        setlistId = id,
                                         setlistTitle = setlistTitle,
                                         requests = requests,
                                         initialScoreId = initialScoreId
                                     )
-                                },
 
+                                    // ✅ 뷰어로 들어가게 오버레이 닫기
+                                    component.closeLibraryOverlay()
+                                },
                                 onRequestPickFromLibrary = { currentItemIds ->
-                                    pickingForSetlistId = id
+                                    pickingForSetlistId = setlistId
                                     pickingSelectedIds = currentItemIds.toSet()
+                                    pickingOrderedIds = currentItemIds
+
+                                    // ✅ 곡목록 편집은 Library 탭에서
                                     selectedTab = HomeTab.Library
-
-                                    // ✅ pick 모드지만, "마지막 목록 화면"은 여전히 setlist detail로 유지시키는 게 자연스러움
-                                    component.viewerSessionStore.setLastPicker(
-                                        ViewerPickerContext.setlistDetail(id)
-                                    )
+                                    component.viewerSessionStore.setLastPicker(ViewerPickerContext.library())
                                 },
-
-                                onReorderItems = { sid, newIds ->
-                                    scope.launch {
-                                        runCatching {
-                                            updateSetlistItems(sid, newIds)
-                                        }.onFailure { e ->
-                                            component.libraryViewModel.emitError(e.message ?: "순서 저장 실패")
-                                        }
-                                    }
-                                }
+                                onReorderItems = { id, newItemIds ->
+                                    scope.launch { updateItemsUseCase(id, newItemIds) }
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun rememberLibraryCandidates(component: RootComponent): List<ScorePickItem> {
-    val scores by component.libraryViewModel.scores.collectAsState()
-    return remember(scores) {
-        scores.map { s ->
-            ScorePickItem(
-                scoreId = s.id,
-                title = s.title,
-                fileName = s.fileName
-            )
         }
     }
 }

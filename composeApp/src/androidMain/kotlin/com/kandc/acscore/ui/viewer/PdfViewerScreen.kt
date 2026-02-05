@@ -48,6 +48,12 @@ fun PdfViewerScreen(
 
     val fileKey = remember(request.filePath) { request.filePath.hashCode().toString() }
     val cache = remember { PdfBitmapCache.default() }
+    DisposableEffect(Unit) {
+        onDispose {
+            // recycle은 없으니 안전
+            runCatching { cache.clear() }
+        }
+    }
     val holder = remember(request.filePath) { AndroidPdfRendererHolder(request.filePath) }
 
     DisposableEffect(holder) {

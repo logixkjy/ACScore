@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,9 +24,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kandc.acscore.share.SetlistBundleExporter
+import com.kandc.acscore.share.ShareAcset
+import com.kandc.acscore.viewer.domain.ViewerOpenRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +88,51 @@ fun SetlistDetailScreen(
                     }
                 },
                 actions = {
+                    val context = LocalContext.current
+                    val scope = rememberCoroutineScope()
+
+                    IconButton(onClick = {
+                        val title = current?.name?.ifBlank { "Setlist" } ?: "Setlist"
+
+                        // ✅ uiIds 순서대로 요청 리스트 생성
+                        val requests: List<ViewerOpenRequest> = uiIds.mapNotNull { id ->
+                            val item = map[id] ?: return@mapNotNull null
+
+                            // filePath가 필요함 (아래 설명 참고)
+                            val path = item.filePath ?: return@mapNotNull null
+
+                            ViewerOpenRequest(
+                                scoreId = item.scoreId,
+                                title = item.title,
+                                filePath = path
+                            )
+                        }
+
+                        scope.launch {
+                            val exporter = SetlistBundleExporter(context)
+
+                            // IO에서 export 수행
+                            val result = withContext(Dispatchers.IO) {
+                                exporter.exportAcset(
+                                    setlistTitle = title,
+                                    requests = requests
+                                )
+                            }
+
+                            when (result) {
+                                is SetlistBundleExporter.Result.Success -> {
+                                    ShareAcset.share(context, result.acsetFile, "세트리스트 공유: $title")
+                                }
+                                is SetlistBundleExporter.Result.Failure -> {
+                                    // TODO: snackbar/토스트로 reason 표시
+                                    // showSnackbar(result.reason)
+                                }
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Share")
+                    }
+
                     IconButton(
                         onClick = {
                             val ids = current?.itemIds.orEmpty()
