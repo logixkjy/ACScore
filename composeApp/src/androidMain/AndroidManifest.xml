@@ -11,12 +11,53 @@
         <activity
             android:exported="true"
             android:name=".MainActivity">
+            <!-- 일반 실행 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 파일 탭(열기) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- 확장자 기반 매칭 (Android 7.0+에서도 잘 동작) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:pathPattern=".*\\.acset" />
+            </intent-filter>
+
+            <!-- 공유(보내기)로 들어올 때도 잡기 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- 공유(보내기)로 들어올 때도 잡기: 일부 앱은 */* 로 보냄 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

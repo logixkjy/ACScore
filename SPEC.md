@@ -55,3 +55,46 @@ Android(KMP)에서 PDF 악보를 가져와 저장/목록/검색하고 뷰어로 
     - 경로: `filesDir/scores/metadata.json`
     - 포맷: `kotlinx.serialization`
     - 내부 식별자는 UUID 기반으로 관리
+
+---
+
+# 🧱 Architectural Invariants (불변 아키텍처 규칙)
+
+아래 규칙은 MVP 이후에도 유지한다.
+
+## 모듈 규칙
+- shared = 순수 비즈니스 로직 + 인터페이스
+- composeApp(androidMain) = 파일 접근 / PDF 렌더링 / picker
+- iosMain = 동일 인터페이스 기반 구현
+
+## 데이터 흐름
+UI → Domain → Repository → Platform 구현
+
+역방향 참조 금지.
+
+## ID 정책
+- 모든 Score / Setlist 는 UUID 기반
+- 파일명 ≠ 식별자
+- 경로 변경 가능 / ID 불변
+
+## 저장 규칙
+내부 저장소 기준:
+
+files/
+scores/
+metadata/
+setlists/
+
+외부 Uri 직접 참조 금지.
+
+---
+
+# 🔧 Extension Rule (확장 시 규칙)
+
+새 기능 추가 시:
+
+- 기존 인터페이스 먼저 검토
+- 새 Repository 필요 여부 판단
+- shared에 interface → platform에 구현 순서
+
+shared에 구현을 먼저 추가하지 않는다.

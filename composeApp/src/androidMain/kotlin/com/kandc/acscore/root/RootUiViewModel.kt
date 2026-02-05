@@ -1,5 +1,6 @@
 package com.kandc.acscore.root
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,8 +14,19 @@ class RootUiViewModel : ViewModel() {
     // ✅ 유저가 한 번이라도 닫았으면(또는 악보 선택으로 닫히면) 이후 자동 재오픈 금지
     private var dismissedOnce: Boolean = false
 
+    // ✅ (추가) 외부에서 들어온 .acset 파일 Uri (한 번 처리하고 비움)
+    private val _pendingAcsetUri = MutableStateFlow<Uri?>(null)
+    val pendingAcsetUri: StateFlow<Uri?> = _pendingAcsetUri
+
+    fun onIncomingAcset(uri: Uri) {
+        _pendingAcsetUri.value = uri
+    }
+
+    fun consumePendingAcset() {
+        _pendingAcsetUri.value = null
+    }
+
     fun openLibraryOverlay(userInitiated: Boolean = true) {
-        // 유저가 버튼 눌러 여는 건 항상 허용
         _isLibraryOverlayOpen.value = true
     }
 
@@ -23,13 +35,11 @@ class RootUiViewModel : ViewModel() {
         if (userInitiated) dismissedOnce = true
     }
 
-    // ✅ 악보 선택으로 닫힌 것도 “유저가 닫은 것”으로 간주
     fun onScoreSelectedAndCloseOverlay() {
         _isLibraryOverlayOpen.value = false
         dismissedOnce = true
     }
 
-    // (선택) 앱 시작 직후에만 자동 표시를 보장하고 싶으면 호출
     fun ensureAutoShownOnce() {
         if (!dismissedOnce) _isLibraryOverlayOpen.value = true
     }

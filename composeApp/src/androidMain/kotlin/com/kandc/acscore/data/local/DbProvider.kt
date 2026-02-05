@@ -15,6 +15,7 @@ object DbProvider {
             )
                 // MVP: 스키마 바뀌면 초기화 허용(지침 반영)
                 .fallbackToDestructiveMigration()
+                .addMigrations(MIGRATION_1_2)
                 .build()
                 .also { instance = it }
         }

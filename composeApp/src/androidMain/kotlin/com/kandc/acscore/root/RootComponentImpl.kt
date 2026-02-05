@@ -1,5 +1,6 @@
 package com.kandc.acscore.root
 
+import android.net.Uri
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
@@ -22,6 +23,10 @@ class RootComponentImpl(
     override val isLibraryOverlayOpen: StateFlow<Boolean> =
         rootUiViewModel.isLibraryOverlayOpen
 
+    // ✅ (추가)
+    override val pendingAcsetUri: StateFlow<Uri?> =
+        rootUiViewModel.pendingAcsetUri
+
     override val stack: Value<ChildStack<RootConfig, RootComponent.Child>> =
         childStack(
             source = navigation,
@@ -41,7 +46,15 @@ class RootComponentImpl(
 
     override fun onScoreSelected(request: ViewerOpenRequest) {
         viewerSessionStore.openOrActivate(request)
-        // ✅ 악보 선택으로 닫힌 것도 “다시 자동으로 열지 않음”에 포함
         rootUiViewModel.onScoreSelectedAndCloseOverlay()
+    }
+
+    // ✅ (추가)
+    override fun handleIncomingAcset(uri: Uri) {
+        rootUiViewModel.onIncomingAcset(uri)
+    }
+
+    override fun consumePendingAcset() {
+        rootUiViewModel.consumePendingAcset()
     }
 }

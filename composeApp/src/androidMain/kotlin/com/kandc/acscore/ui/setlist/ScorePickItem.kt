@@ -4,4 +4,5 @@ data class ScorePickItem(
     val scoreId: String,
     val title: String,
     val fileName: String,
+    val filePath: String
 )

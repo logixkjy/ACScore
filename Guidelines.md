@@ -108,3 +108,50 @@
 - Android / iOS UI 차별화
 
 (단, MVP v1 범위에는 포함하지 않는다)
+
+---
+
+# 🔒 Change Contract (변경 계약 규칙)
+
+이 프로젝트는 구조 안정성을 최우선으로 한다.  
+아래 계약 규칙은 기능 추가 시에도 반드시 유지한다.
+
+## 절대 변경 금지 규칙
+- shared 모듈에 플랫폼 의존 코드 추가 금지
+- Repository interface는 shared에만 정의
+- 플랫폼 구현은 androidMain / iosMain 에만 위치
+- 내부 저장 경로 규칙은 SPEC.md 정의를 따른다
+- ScoreId / SetlistId UUID 정책은 변경하지 않는다
+- Viewer 세션 복원 책임은 ViewerSessionStore 단일 책임으로 유지
+
+## 구조 변경 필요 시
+- TASK 단위로 먼저 정의
+- 변경 범위 파일 목록을 먼저 확정
+- UI → Domain → Data 역방향 변경 금지
+- 반드시 Data → Domain → UI 순으로 수정
+
+---
+
+# 🧩 Work Unit Rule (작업 단위 규칙)
+
+단편 수정으로 인한 구조 붕괴를 방지하기 위해  
+모든 작업은 아래 단위 중 하나로만 수행한다.
+
+허용되는 작업 단위:
+
+1. Feature 단위
+   예: Setlist 공유 기능 전체
+
+2. Flow 단위
+   예: Import → 저장 → metadata 반영 → 목록 갱신
+
+3. File-set 단위
+   예: ViewerSessionStore + SnapshotJson + RestoreLogic
+
+금지:
+
+- 한 파일만 수정 요청 (버그 핫픽스 제외)
+- View만 수정 요청
+- Model만 수정 요청
+
+항상 관련 레이어 전체를 함께 본다.
