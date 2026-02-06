@@ -28,15 +28,13 @@ import com.kandc.acscore.shard.domain.usecase.SearchScoresUseCase
 import com.kandc.acscore.ui.library.LibraryViewModel
 import com.kandc.acscore.ui.library.LibraryViewModelFactory
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-
-        // ✅ 최초 진입(파일 탭 / 공유로 열기)
-        handleIncomingIntent(intent)
 
         // Repo / UseCases
         val db = DbProvider.get(this)
@@ -61,6 +59,7 @@ class MainActivity : ComponentActivity() {
 
         // ✅ 핵심: defaultComponentContext()는 onCreate에서 딱 1번만 생성
         val componentContext = defaultComponentContext()
+        val initialAcsetUri: Uri? = extractIncomingAcsetUri(intent)
 
         setContent {
             MaterialTheme {
@@ -79,7 +78,15 @@ class MainActivity : ComponentActivity() {
                      * 지금은 RootUiViewModel에 함수가 없으니, 우선 TODO로 연결 포인트만 만들어둔다.
                      */
                     LaunchedEffect(Unit) {
-                        IncomingAcsetBus.events.collectLatest { uri ->
+                        // 1) Handle incoming acset while the app is already running
+                        launch {
+                            IncomingAcsetBus.events.collectLatest { uri ->
+                                root.handleIncomingAcset(uri)
+                            }
+                        }
+
+                        // 2) Handle cold-start acset (sent before the collector was active)
+                        initialAcsetUri?.let { uri ->
                             root.handleIncomingAcset(uri)
                         }
                     }
@@ -92,24 +99,56 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // ✅ 앱이 떠있는 상태에서 다시 파일을 탭했을 때
         handleIncomingIntent(intent)
     }
 
-    private fun handleIncomingIntent(intent: android.content.Intent) {
-        val uri: Uri = when (intent.action) {
-            android.content.Intent.ACTION_VIEW ->
-                intent.data ?: return
+    private fun handleIncomingIntent(intent: Intent) {
+        val uri = extractIncomingAcsetUri(intent) ?: return
+        IncomingAcsetBus.emit(uri)
+    }
 
-            android.content.Intent.ACTION_SEND ->
-                intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM) ?: return
+    private fun extractIncomingAcsetUri(intent: Intent): Uri? {
+        val candidates: List<Uri> = when (intent.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
 
-            else -> return
+            Intent.ACTION_SEND -> {
+                val fromExtra = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                val fromClip = intent.clipData?.getItemAt(0)?.uri
+                listOfNotNull(fromExtra, fromClip)
+            }
+
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val list = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+                val clip = intent.clipData?.let { cd ->
+                    (0 until cd.itemCount).mapNotNull { idx -> cd.getItemAt(idx)?.uri }
+                }.orEmpty()
+                (list + clip).distinct()
+            }
+
+            else -> {
+                // Some providers use clipData even for VIEW
+                val fromClip = intent.clipData?.getItemAt(0)?.uri
+                listOfNotNull(fromClip)
+            }
         }
 
-        val looksAcset = uri.toString().contains(".acset", ignoreCase = true)
-        if (!looksAcset) return
+        val uri = candidates.firstOrNull { u ->
+            val s = u.toString()
+            s.endsWith(".acset", ignoreCase = true) || s.contains(".acset", ignoreCase = true)
+        } ?: return null
 
-        IncomingAcsetBus.emit(uri) // ✅ 이제 Uri (non-null)
+        // Try to keep read permission across process restarts (best-effort)
+        runCatching {
+            val flags = intent.flags
+            val takeFlags = flags and
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            if (takeFlags != 0) {
+                contentResolver.takePersistableUriPermission(uri, takeFlags)
+            }
+        }
+
+        return uri
     }
 }

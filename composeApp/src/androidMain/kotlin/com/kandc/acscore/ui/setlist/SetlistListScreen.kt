@@ -36,6 +36,10 @@ fun SetlistListScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var createName by remember { mutableStateOf("") }
 
+    // ✅ 삭제 확인 다이얼로그
+    data class PendingDelete(val id: String, val name: String, val count: Int)
+    var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
+
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -84,14 +88,42 @@ fun SetlistListScreen(
                         count = item.itemIds.size,
                         onClick = { onOpenSetlist(item.id) },
                         onDelete = {
-                            vm.deleteSetlist(item.id) { snackbarMessage = it }
+                            pendingDelete = PendingDelete(
+                                id = item.id,
+                                name = item.name,
+                                count = item.itemIds.size
+                            )
                         }
                     )
                 }
             }
         }
     }
-
+    // ✅ 삭제 확인 다이얼로그
+    val del = pendingDelete
+    if (del != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("곡목록을 삭제할까요?") },
+            text = {
+                Text("'${del.name}' (총 ${del.count}곡)을 삭제합니다.\n이 작업은 되돌릴 수 없어요.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val target = pendingDelete ?: return@TextButton
+                        pendingDelete = null
+                        vm.deleteSetlist(target.id) { snackbarMessage = it }
+                    }
+                ) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("취소") }
+            }
+        )
+    }
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = {

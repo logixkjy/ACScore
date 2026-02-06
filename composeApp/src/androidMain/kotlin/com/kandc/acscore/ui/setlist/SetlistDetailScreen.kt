@@ -373,16 +373,16 @@ private fun ReorderableIdList(
                             overflow = TextOverflow.Ellipsis
                         )
                         val sub = idToSubtitle(id)
-                        if (sub.isNotBlank()) {
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = sub,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+//                        if (sub.isNotBlank()) {
+//                            Spacer(Modifier.height(2.dp))
+//                            Text(
+//                                text = sub,
+//                                maxLines = 1,
+//                                overflow = TextOverflow.Ellipsis,
+//                                style = MaterialTheme.typography.bodySmall,
+//                                color = MaterialTheme.colorScheme.onSurfaceVariant
+//                            )
+//                        }
                     }
 
                     IconButton(onClick = { onDelete(id) }) {

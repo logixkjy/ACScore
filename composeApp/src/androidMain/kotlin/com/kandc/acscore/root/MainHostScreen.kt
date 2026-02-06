@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.kandc.acscore.di.SetlistDi
 import com.kandc.acscore.session.viewer.ViewerPickerContext
 import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
@@ -150,9 +151,9 @@ fun MainHostScreen(component: RootComponent) {
 
                             when (result) {
                                 is AcsetImporter.Result.Success -> {
-                                    Log.w("Snack Bar", "가져오기 완료: +${result.importedCount} (중복 ${result.skippedDuplicateCount}개 재사용)")
+
                                     snackbarHostState.showSnackbar(
-                                        "가져오기 완료: +${result.importedCount} (중복 ${result.skippedDuplicateCount}개 재사용)"
+                                        "곡목록 가져오기가 완료됩었습니다."
                                     )
 
                                     val baseTitle = result.setlistTitle
@@ -199,17 +200,15 @@ fun MainHostScreen(component: RootComponent) {
                                         updateItemsUseCaseForImport(created.id, result.orderedScoreIds)
                                         created
                                     }.onSuccess { created ->
-                                        Log.w("Snack Bar", "곡목록 '${created.name}'에 ${result.orderedScoreIds.size}곡 추가 완료")
+                                        component.libraryViewModel.refresh()
                                         snackbarHostState.showSnackbar("곡목록 '${created.name}'에 ${result.orderedScoreIds.size}곡 추가 완료")
                                     }.onFailure { e ->
-                                        Log.w("Snack Bar", e.message ?: "곡목록 저장에 실패했어요.")
                                         snackbarHostState.showSnackbar(e.message ?: "곡목록 저장에 실패했어요.")
                                     }
                                 }
                                 is AcsetImporter.Result.Failure -> {
-                                    Log.w("Snack Bar", "가져오기에 실패했어요.")
                                     snackbarHostState.showSnackbar(
-                                        result.reason.ifBlank { "가져오기에 실패했어요." }
+                                        result.reason.ifBlank { "곡목록 가져오기에 실패했어요." }
                                     )
                                 }
                             }
@@ -281,10 +280,9 @@ fun MainHostScreen(component: RootComponent) {
                                     updateItemsUseCaseForImport(created.id, info.orderedScoreIds)
                                     created
                                 }
-                                Log.w("Snack Bar", "곡목록 '${created.name}'에 ${info.orderedScoreIds.size}곡 추가 완료")
-                                snackbarHostState.showSnackbar("곡목록 '${created.name}'에 ${info.orderedScoreIds.size}곡 추가 완료")
+
+                                snackbarHostState.showSnackbar("곡 목록 '${created.name}'에 ${info.orderedScoreIds.size}곡 추가 완료")
                             } catch (e: Throwable) {
-                                Log.w("Snack Bar", e.message ?: "곡목록 저장에 실패했어요.")
                                 snackbarHostState.showSnackbar(e.message ?: "곡목록 저장에 실패했어요.")
                             } finally {
                                 duplicateContentInfo = null
@@ -298,8 +296,7 @@ fun MainHostScreen(component: RootComponent) {
                     onClick = {
                         duplicateContentInfo = null
                         scope.launch {
-                            Log.w("Snack Bar", "가져오기를 건너뛰었어요.")
-                            snackbarHostState.showSnackbar("가져오기를 건너뛰었어요.")
+                            snackbarHostState.showSnackbar("곡목록 추가를 스킵하였습니다..")
                         }
                     }
                 ) { Text("스킵") }
@@ -442,7 +439,7 @@ fun MainHostScreen(component: RootComponent) {
                                 // ✅ setlist import 흐름으로 연결
                                 component.handleIncomingAcset(uri)
                                 // 오버레이는 닫아도 되고(가져오기 다이얼로그 뜨니까)
-                                component.closeLibraryOverlay()
+//                                component.closeLibraryOverlay()
                             },
 
                             modifier = Modifier.fillMaxSize()
@@ -537,6 +534,7 @@ fun MainHostScreen(component: RootComponent) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 32.dp)
+                .zIndex(11f)
         )
     }
 }

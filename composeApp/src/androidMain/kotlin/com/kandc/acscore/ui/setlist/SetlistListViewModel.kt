@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -24,8 +25,15 @@ class SetlistListViewModel(
 
     val setlists: StateFlow<List<Setlist>> =
         setlistsFlow
-            .catch { emit(emptyList<Setlist>()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .map { list ->
+                list.sortedBy { it.name.lowercase() } // ✅ 이름순 정렬 (대소문자 무시)
+            }
+            .catch { emit(emptyList()) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                emptyList()
+            )
 
     fun createSetlist(name: String, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
