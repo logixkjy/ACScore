@@ -71,8 +71,18 @@ fun SetlistDetailScreen(
     // (백업) 다이얼로그 방식 유지
     var showPicker by rememberSaveable { mutableStateOf(false) }
 
+    var isSharing by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    suspend fun showSnack(message: String) {
+        runCatching { snackbarHostState.showSnackbar(message) }
+    }
+    val canInteract = current != null && !isSharing
+
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -88,52 +98,65 @@ fun SetlistDetailScreen(
                     }
                 },
                 actions = {
-                    val context = LocalContext.current
-                    val scope = rememberCoroutineScope()
+                    IconButton(
+                        enabled = canInteract,
+                        onClick = {
+                            if (isSharing) return@IconButton
+                            isSharing = true
 
-                    IconButton(onClick = {
-                        val title = current?.name?.ifBlank { "Setlist" } ?: "Setlist"
+                            scope.launch {
+                                try {
+                                    val title = current?.name?.ifBlank { "Setlist" } ?: "Setlist"
 
-                        // ✅ uiIds 순서대로 요청 리스트 생성
-                        val requests: List<ViewerOpenRequest> = uiIds.mapNotNull { id ->
-                            val item = map[id] ?: return@mapNotNull null
+                                    val requests: List<ViewerOpenRequest> = uiIds.mapNotNull { id ->
+                                        val item = map[id] ?: return@mapNotNull null
+                                        val path = item.filePath ?: return@mapNotNull null
+                                        ViewerOpenRequest(
+                                            scoreId = item.scoreId,
+                                            title = item.title,
+                                            filePath = path
+                                        )
+                                    }
 
-                            // filePath가 필요함 (아래 설명 참고)
-                            val path = item.filePath ?: return@mapNotNull null
+                                    if (requests.isEmpty()) {
+                                        showSnack("공유할 곡이 없어요.")
+                                        return@launch
+                                    }
 
-                            ViewerOpenRequest(
-                                scoreId = item.scoreId,
-                                title = item.title,
-                                filePath = path
+                                    val exporter = SetlistBundleExporter(context)
+                                    val result = withContext(Dispatchers.IO) {
+                                        exporter.exportAcset(setlistTitle = title, requests = requests)
+                                    }
+
+                                    when (result) {
+                                        is SetlistBundleExporter.Result.Success -> {
+                                            ShareAcset.share(context, result.acsetFile, title)
+                                            showSnack("공유 파일이 준비됐어요.")
+                                        }
+                                        is SetlistBundleExporter.Result.Failure -> {
+                                            showSnack(result.reason.ifBlank { "공유 준비에 실패했어요." })
+                                        }
+                                    }
+                                } catch (t: Throwable) {
+                                    showSnack("공유 준비에 실패했어요: ${t.message ?: t.javaClass.simpleName}")
+                                } finally {
+                                    isSharing = false
+                                }
+                            }
+                        }
+                    ) {
+                        if (isSharing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
                             )
+                        } else {
+                            Icon(Icons.Default.Share, contentDescription = "Share")
                         }
-
-                        scope.launch {
-                            val exporter = SetlistBundleExporter(context)
-
-                            // IO에서 export 수행
-                            val result = withContext(Dispatchers.IO) {
-                                exporter.exportAcset(
-                                    setlistTitle = title,
-                                    requests = requests
-                                )
-                            }
-
-                            when (result) {
-                                is SetlistBundleExporter.Result.Success -> {
-                                    ShareAcset.share(context, result.acsetFile, "세트리스트 공유: $title")
-                                }
-                                is SetlistBundleExporter.Result.Failure -> {
-                                    // TODO: snackbar/토스트로 reason 표시
-                                    // showSnackbar(result.reason)
-                                }
-                            }
-                        }
-                    }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share")
                     }
 
                     IconButton(
+                        enabled = canInteract,
                         onClick = {
                             val ids = current?.itemIds.orEmpty()
                             if (onRequestPickFromLibrary != null) onRequestPickFromLibrary(ids)
@@ -182,10 +205,25 @@ fun SetlistDetailScreen(
         }
     }
 
+    if (isSharing) {
+        AlertDialog(
+            onDismissRequest = { /* no-op */ },
+            confirmButton = { /* no-op */ },
+            title = { Text("공유 준비 중…") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("파일을 압축하고 있어요.")
+                }
+            }
+        )
+    }
+
     // -------------------------
     // (백업) 다이얼로그 기반 추가
     // -------------------------
-    if (showPicker) {
+    if (showPicker && !isSharing) {
         ScorePickerDialog(
             candidates = libraryCandidates,
             selectedIds = setlist?.itemIds?.toSet() ?: emptySet(),

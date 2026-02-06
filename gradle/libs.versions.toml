@@ -21,6 +21,7 @@ runtime = "1.10.1"
 runtimeSaveable = "1.10.1"
 foundationLayout = "1.10.2"
 foundation = "1.10.2"
+material3Version = "1.4.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -50,6 +51,7 @@ androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", versi
 androidx-runtime-saveable = { group = "androidx.compose.runtime", name = "runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3Version" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

@@ -9,6 +9,7 @@ import com.kandc.acscore.shared.domain.usecase.CreateSetlistUseCase
 import com.kandc.acscore.shared.domain.usecase.DeleteSetlistUseCase
 import com.kandc.acscore.shared.domain.usecase.ObserveSetlistUseCase
 import com.kandc.acscore.shared.domain.usecase.ObserveSetlistsUseCase
+import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
 import kotlinx.serialization.json.Json
 
 object SetlistDi {
@@ -33,16 +34,18 @@ object SetlistDi {
 
     fun provideUseCases(repo: SetlistRepository): UseCases =
         UseCases(
-            observeSetlists = ObserveSetlistsUseCase(repo), // ✅ 목록
-            observeSetlist = ObserveSetlistsUseCase(repo),   // ✅ 단건
+            observeSetlists = ObserveSetlistsUseCase(repo),
+            observeSetlist = ObserveSetlistUseCase(repo),
             createSetlist = CreateSetlistUseCase(repo),
-            deleteSetlist = DeleteSetlistUseCase(repo)
+            deleteSetlist = DeleteSetlistUseCase(repo),
+            updateItems = UpdateSetlistItemsUseCase(repo),
         )
 
     data class UseCases(
         val observeSetlists: ObserveSetlistsUseCase,
-        val observeSetlist: ObserveSetlistsUseCase,
+        val observeSetlist: ObserveSetlistUseCase,
         val createSetlist: CreateSetlistUseCase,
         val deleteSetlist: DeleteSetlistUseCase,
+        val updateItems: UpdateSetlistItemsUseCase,
     )
 }

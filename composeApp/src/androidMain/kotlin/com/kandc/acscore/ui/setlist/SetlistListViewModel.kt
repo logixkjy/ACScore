@@ -40,4 +40,29 @@ class SetlistListViewModel(
                 .onFailure { onError(it.message ?: "삭제에 실패했어요.") }
         }
     }
+
+    fun createSetlistForImport(
+        name: String,
+        itemIds: List<String>,
+        onSuccess: (setlistId: String) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                // 1) 세트리스트 생성 (Setlist 반환)
+                val safeName = name.trim().ifBlank { "Setlist" }
+                val created = useCases.createSetlist(safeName)
+                val setlistId = created.id
+
+                // 2) 아이템 저장 (순서 유지)
+                useCases.updateItems(setlistId, itemIds)
+
+                setlistId
+            }.onSuccess { id ->
+                onSuccess(id)
+            }.onFailure {
+                onError(it.message ?: "세트리스트 생성에 실패했어요.")
+            }
+        }
+    }
 }

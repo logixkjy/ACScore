@@ -1,5 +1,7 @@
 package com.kandc.acscore.ui.library
 
+import android.content.Context
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,6 +40,8 @@ import kotlin.math.floor
 fun LibraryScreen(
     vm: LibraryViewModel,
     onOpenViewer: (scoreId: String, title: String, fileName: String) -> Unit,
+    // ✅ 추가: acset 선택 시 MainHostScreen으로 전달
+    onImportAcset: ((Uri) -> Unit)? = null,
 
     // ✅ pick(edit) mode
     onPickScore: ((scoreId: String, title: String, fileName: String) -> Unit)? = null,
@@ -45,6 +50,8 @@ fun LibraryScreen(
 
     // ✅ pick 상태: 체크된 곡(최종 포함)
     pickedScoreIds: Set<String> = emptySet(),
+
+    onPickAcset: ((Uri) -> Unit)? = null,
 
     // ✅ 추가
     modifier: Modifier = Modifier,
@@ -55,11 +62,27 @@ fun LibraryScreen(
     val isImporting by vm.isImporting.collectAsState()
 
     val isPickMode = onPickScore != null
+    val context = LocalContext.current
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        if (uris.isNotEmpty()) vm.importUris(uris.map { it.toString() })
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+
+        val (acsets, pdfs) = uris.partition { uri ->
+            isAcsetUri(context, uri)
+        }
+
+        // 1) acset 먼저 처리
+        if (acsets.isNotEmpty()) {
+            // MVP: 일단 첫 번째만
+            onPickAcset?.invoke(acsets.first())
+        }
+
+        // 2) pdf는 기존대로 library import
+        if (pdfs.isNotEmpty()) {
+            vm.importUris(pdfs.map { it.toString() })
+        }
     }
 
     LaunchedEffect(Unit) { vm.refresh() }
@@ -130,7 +153,10 @@ fun LibraryScreen(
                     actions = {
                         TextButton(
                             enabled = !isImporting,
-                            onClick = { picker.launch(arrayOf("application/pdf")) }
+                            onClick = {
+                                // ✅ 여기!
+                                picker.launch(arrayOf("application/pdf", "*/*"))
+                            }
                         ) { Text("악보추가") }
                     }
                 )
@@ -584,4 +610,26 @@ private fun SectionHeader(
             }
         }
     }
+}
+
+private fun Uri.isAcset(): Boolean {
+    val raw = toString()
+    return raw.endsWith(".acset", ignoreCase = true)
+}
+
+private fun Uri.isPdf(): Boolean {
+    val raw = toString()
+    return raw.endsWith(".pdf", ignoreCase = true)
+}
+
+private fun isAcsetUri(context: Context, uri: Uri): Boolean {
+    val name = runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+        }
+    }.getOrNull()
+
+    val lower = (name ?: uri.toString()).lowercase()
+    return lower.endsWith(".acset")
 }

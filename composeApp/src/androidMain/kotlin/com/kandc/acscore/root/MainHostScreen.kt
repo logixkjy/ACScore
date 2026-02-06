@@ -1,6 +1,8 @@
 package com.kandc.acscore.root
 
 import android.net.Uri
+import android.util.Log
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -24,8 +27,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kandc.acscore.di.SetlistDi
 import com.kandc.acscore.session.viewer.ViewerPickerContext
-import com.kandc.acscore.shared.domain.usecase.AddScoreToSetlistUseCase
 import com.kandc.acscore.shared.domain.usecase.UpdateSetlistItemsUseCase
+import com.kandc.acscore.shared.domain.usecase.CreateSetlistUseCase
 import com.kandc.acscore.share.AcsetImporter
 import com.kandc.acscore.ui.common.SegmentedTabs
 import com.kandc.acscore.ui.library.LibraryScreen
@@ -34,8 +37,10 @@ import com.kandc.acscore.ui.setlist.SetlistDetailScreen
 import com.kandc.acscore.ui.setlist.SetlistListScreen
 import com.kandc.acscore.ui.viewer.TabbedViewerScreen
 import com.kandc.acscore.viewer.domain.ViewerOpenRequest
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class HomeTab { Library, Setlists }
 
@@ -63,6 +68,22 @@ fun MainHostScreen(component: RootComponent) {
     var pickDraftIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val sessionState by component.viewerSessionStore.state.collectAsState()
+
+    val setlistRepo = remember(context.applicationContext) {
+        SetlistDi.provideRepository(context.applicationContext)
+    }
+    val createSetlistUseCase = remember(setlistRepo) { CreateSetlistUseCase(setlistRepo) }
+    val updateItemsUseCaseForImport = remember(setlistRepo) { UpdateSetlistItemsUseCase(setlistRepo) }
+
+    data class DuplicateContentInfo(
+        val baseTitle: String,
+        val orderedScoreIds: List<String>,
+        val existingSetlistName: String,
+        val existingCount: Int,
+        val previewTitles: List<String>, // 최대 3~5개
+    )
+
+    var duplicateContentInfo by remember { mutableStateOf<DuplicateContentInfo?>(null) }
 
     /**
      * ✅ (1) 오버레이가 열릴 때 lastPicker 기반으로 UI 복원
@@ -120,20 +141,73 @@ fun MainHostScreen(component: RootComponent) {
                     onClick = {
                         isImporting = true
                         scope.launch {
-                            val result = importer.importFromUri(context, uri)
+                            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                importer.importFromUri(context, uri)
+                            }
 
                             isImporting = false
                             component.consumePendingAcset()
 
                             when (result) {
                                 is AcsetImporter.Result.Success -> {
+                                    Log.w("Snack Bar", "가져오기 완료: +${result.importedCount} (중복 ${result.skippedDuplicateCount}개 재사용)")
                                     snackbarHostState.showSnackbar(
                                         "가져오기 완료: +${result.importedCount} (중복 ${result.skippedDuplicateCount}개 재사용)"
                                     )
-                                    // TODO(T6-3): setlist 생성 + 상세로 이동
-                                    // result.setlistTitle / result.orderedScoreIds 활용
+
+                                    val baseTitle = result.setlistTitle
+                                        ?.trim()
+                                        ?.removeSuffix(".acset")
+                                        ?.takeUnless { it.isNullOrBlank() }
+                                        ?: "Setlist"
+
+                                    // ✅ 기존 setlist들 가져와서 "내용 중복" 검사
+                                    val existing = runCatching { setlistRepo.getAll() }.getOrElse { emptyList() }
+
+                                    // 내용 중복 기준: "같은 scoreId 목록" (순서 무시)
+                                    // - 순서까지 같아야만 중복으로 보려면: 아래 비교를 `it.itemIds == result.orderedScoreIds` 로 바꾸면 됨
+                                    val importedSet = result.orderedScoreIds.toSet()
+
+                                    val dup = existing.firstOrNull {
+                                        it.itemIds.size == result.orderedScoreIds.size &&
+                                                it.itemIds.toSet() == importedSet
+                                    }
+
+                                    if (dup != null) {
+                                        // 라이브러리에서 제목 미리보기 추출 (있으면)
+                                        val scoreMap = component.libraryViewModel.scores.value.associateBy { it.id }
+                                        val previews = dup.itemIds
+                                            .mapNotNull { scoreMap[it]?.title }
+                                            .take(3) // 👈 3개만
+
+                                        duplicateContentInfo = DuplicateContentInfo(
+                                            baseTitle = baseTitle,
+                                            orderedScoreIds = result.orderedScoreIds,
+                                            existingSetlistName = dup.name,
+                                            existingCount = dup.itemIds.size,
+                                            previewTitles = previews
+                                        )
+                                        return@launch
+                                    }
+
+                                    // ✅ 내용 중복이 아니면 그대로 생성 + 저장
+                                    runCatching {
+                                        val existingNames = existing.map { it.name }.toSet()
+                                        val uniqueTitle = makeUniqueSetlistName(baseTitle, existingNames)
+
+                                        val created = createSetlistUseCase(uniqueTitle)
+                                        updateItemsUseCaseForImport(created.id, result.orderedScoreIds)
+                                        created
+                                    }.onSuccess { created ->
+                                        Log.w("Snack Bar", "곡목록 '${created.name}'에 ${result.orderedScoreIds.size}곡 추가 완료")
+                                        snackbarHostState.showSnackbar("곡목록 '${created.name}'에 ${result.orderedScoreIds.size}곡 추가 완료")
+                                    }.onFailure { e ->
+                                        Log.w("Snack Bar", e.message ?: "곡목록 저장에 실패했어요.")
+                                        snackbarHostState.showSnackbar(e.message ?: "곡목록 저장에 실패했어요.")
+                                    }
                                 }
                                 is AcsetImporter.Result.Failure -> {
+                                    Log.w("Snack Bar", "가져오기에 실패했어요.")
                                     snackbarHostState.showSnackbar(
                                         result.reason.ifBlank { "가져오기에 실패했어요." }
                                     )
@@ -152,13 +226,88 @@ fun MainHostScreen(component: RootComponent) {
         )
     }
 
-    Box(Modifier.fillMaxSize()) {
-        // ✅ Import 결과 알림(하단)
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+    val dupInfo = duplicateContentInfo
+    if (dupInfo != null) {
+        AlertDialog(
+            onDismissRequest = { duplicateContentInfo = null },
+            title = { Text("이미 같은 구성의 곡목록이 있어요") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "기존 곡목록 '${dupInfo.existingSetlistName}'에는 " +
+                                "${dupInfo.existingCount}곡이 이미 들어 있어요."
+                    )
 
+                    if (dupInfo.previewTitles.isNotEmpty()) {
+                        Text(
+                            "예:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        dupInfo.previewTitles.forEach { title ->
+                            Text(
+                                "• $title",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (dupInfo.existingCount > dupInfo.previewTitles.size) {
+                            Text(
+                                "외 ${dupInfo.existingCount - dupInfo.previewTitles.size}곡",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    Text("그래도 새로 만들까요?")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val info = dupInfo ?: return@TextButton
+
+                        scope.launch {
+                            try {
+                                val created = withContext(Dispatchers.IO) {
+                                    val existingNames = runCatching { setlistRepo.getAll() }
+                                        .getOrElse { emptyList() }
+                                        .map { it.name }
+                                        .toSet()
+
+                                    val uniqueTitle = makeUniqueSetlistName(info.baseTitle, existingNames)
+                                    val created = createSetlistUseCase(uniqueTitle)
+                                    updateItemsUseCaseForImport(created.id, info.orderedScoreIds)
+                                    created
+                                }
+                                Log.w("Snack Bar", "곡목록 '${created.name}'에 ${info.orderedScoreIds.size}곡 추가 완료")
+                                snackbarHostState.showSnackbar("곡목록 '${created.name}'에 ${info.orderedScoreIds.size}곡 추가 완료")
+                            } catch (e: Throwable) {
+                                Log.w("Snack Bar", e.message ?: "곡목록 저장에 실패했어요.")
+                                snackbarHostState.showSnackbar(e.message ?: "곡목록 저장에 실패했어요.")
+                            } finally {
+                                duplicateContentInfo = null
+                            }
+                        }
+                    }
+                ) { Text("새로 만들기") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        duplicateContentInfo = null
+                        scope.launch {
+                            Log.w("Snack Bar", "가져오기를 건너뛰었어요.")
+                            snackbarHostState.showSnackbar("가져오기를 건너뛰었어요.")
+                        }
+                    }
+                ) { Text("스킵") }
+            }
+        )
+    }
+
+    Box(Modifier.fillMaxSize()) {
         TabbedViewerScreen(
             sessionStore = component.viewerSessionStore,
             onRequestOpenPicker = {
@@ -199,15 +348,7 @@ fun MainHostScreen(component: RootComponent) {
 
                 when (selectedTab) {
                     HomeTab.Library -> {
-                        val context = LocalContext.current
-                        val scope = rememberCoroutineScope()
 
-                        val setlistRepo = remember(context.applicationContext) {
-                            SetlistDi.provideRepository(context.applicationContext)
-                        }
-                        val addToSetlist = remember(setlistRepo) {
-                            AddScoreToSetlistUseCase(setlistRepo)
-                        }
                         val updateItemsUseCase = remember(setlistRepo) {
                             UpdateSetlistItemsUseCase(setlistRepo)
                         }
@@ -239,6 +380,10 @@ fun MainHostScreen(component: RootComponent) {
                                 component.onScoreSelected(
                                     ViewerOpenRequest(scoreId = scoreId, title = title, filePath = filePath)
                                 )
+                            },
+
+                            onImportAcset = { uri ->
+                                component.handleIncomingAcset(uri) // == pendingAcsetUri에 올려서 Import 다이얼로그 띄움
                             },
 
                             // ✅ pick 모드: 즉시 DB 반영 X, 체크만 토글
@@ -292,6 +437,14 @@ fun MainHostScreen(component: RootComponent) {
                             },
 
                             pickedScoreIds = pickingSelectedIds,
+
+                            onPickAcset = { uri ->
+                                // ✅ setlist import 흐름으로 연결
+                                component.handleIncomingAcset(uri)
+                                // 오버레이는 닫아도 되고(가져오기 다이얼로그 뜨니까)
+                                component.closeLibraryOverlay()
+                            },
+
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -302,10 +455,6 @@ fun MainHostScreen(component: RootComponent) {
                             component.libraryViewModel.refresh()
                         }
 
-                        val context = LocalContext.current
-                        val setlistRepo = remember(context.applicationContext) {
-                            SetlistDi.provideRepository(context.applicationContext)
-                        }
                         val updateItemsUseCase = remember(setlistRepo) {
                             UpdateSetlistItemsUseCase(setlistRepo)
                         }
@@ -381,5 +530,27 @@ fun MainHostScreen(component: RootComponent) {
                 }
             }
         }
+
+        // ✅ Import 결과 알림(하단) - 다른 레이어(뷰어/오버레이) 위에 보이도록 마지막에 배치
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp)
+        )
+    }
+}
+
+fun makeUniqueSetlistName(base: String, existingNames: Set<String>): String {
+    val trimmed = base.trim()
+    if (trimmed.isBlank()) return "Setlist"
+
+    if (!existingNames.contains(trimmed)) return trimmed
+
+    var n = 2
+    while (true) {
+        val candidate = "$trimmed ($n)"
+        if (!existingNames.contains(candidate)) return candidate
+        n++
     }
 }

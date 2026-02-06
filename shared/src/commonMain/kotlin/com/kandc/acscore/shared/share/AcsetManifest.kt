@@ -1,6 +1,5 @@
 package com.kandc.acscore.shared.share
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -13,7 +12,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AcsetManifest(
     val version: Int = 1,
-
     val setlistTitle: String? = null,
 
     // 세트리스트 순서
@@ -22,7 +20,11 @@ data class AcsetManifest(
     @Serializable
     data class Item(
         val title: String,
-        val contentHash: String, // ✅ dedup key
+
+        // ✅ 구버전/외부 파일 호환: 없으면 decode 되게 기본값 제공
+        // (importer에서 빈 값이면 실제 PDF bytes로 hash 계산해서 채우면 됨)
+        val contentHash: String = "",
+
         val fileName: String? = null, // 원본 파일명(옵션)
     )
 }

@@ -120,7 +120,7 @@ class SetlistBundleExporter(
 
             val outAcset = File(
                 exportDir,
-                "setlist_${safeTitle}_${System.currentTimeMillis()}.acset"
+                "$safeTitle.acset"
             )
             outAcset.writeBytes(acsetBytes)
 
